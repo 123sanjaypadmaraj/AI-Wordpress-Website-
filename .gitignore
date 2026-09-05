@@ -1,0 +1,13 @@
+node_modules/
+.next/
+dist/
+build/
+*.log
+.env
+.env.local
+apps/agent/data/*.json
+!apps/agent/data/.gitkeep
+infrastructure/docker/projects/*
+!infrastructure/docker/projects/.gitkeep
+.DS_Store
+Thumbs.db

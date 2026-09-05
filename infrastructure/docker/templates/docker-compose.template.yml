@@ -1,0 +1,116 @@
+# Generated per-project by apps/agent/src/docker/compose.ts -- do not hand
+# edit files under infrastructure/docker/projects/*, they're regenerated.
+#
+# Isolation model (spec section 37): each project gets its own network,
+# its own named volumes, and its own container name prefix, so one
+# project's WordPress/DB can never see another's.
+name: __COMPOSE_PROJECT__
+
+services:
+  wordpress:
+    # Bug fix: was pinned to 6.6, which several current wordpress.org
+    # plugins now reject as below their minimum WP version (discovered via
+    # PLG-01's install pipeline failing on woocommerce/mailpoet/etc. with
+    # "This plugin does not work with your version of WordPress"). Tracking
+    # latest-WordPress-on-8.3 trades a little build reproducibility for not
+    # silently falling behind plugin requirements again.
+    image: wordpress:php8.3-apache
+    container_name: __PREFIX__-wordpress
+    restart: unless-stopped
+    # DOCK-07: per-project resource caps so one project can't starve the
+    # host or its siblings. `cpus`/`mem_limit` apply under plain
+    # `docker compose up` (no swarm required), unlike `deploy.resources`.
+    cpus: 1.0
+    mem_limit: 512m
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:__WP_PORT__:80"
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_NAME: __DB_NAME__
+      WORDPRESS_DB_USER: __DB_USER__
+      WORDPRESS_DB_PASSWORD: __DB_PASSWORD__
+      WORDPRESS_DEBUG: 0
+      # Bug fix: PHP's stock 128M memory_limit isn't enough for some
+      # official plugins (Yoast SEO's admin-bar init alone exhausted it
+      # during PLG-01 testing, fatally, which then broke every subsequent
+      # WP-CLI call against the site until the plugin was removed).
+      WORDPRESS_CONFIG_EXTRA: &config_extra |
+        define('WP_MEMORY_LIMIT', '256M');
+        define('WP_MAX_MEMORY_LIMIT', '256M');
+    volumes:
+      - __PREFIX__-wp-html:/var/www/html
+    networks:
+      - __PREFIX__-net
+
+  wpcli:
+    image: wordpress:cli-php8.3
+    container_name: __PREFIX__-wpcli
+    # Bug fix: this had no restart policy, so unlike `wordpress`/`db` it
+    # never came back after a Docker Desktop restart -- every WP-CLI call
+    # (the agent's *only* way to touch the site) would fail with
+    # `service "wpcli" is not running` until someone ran `docker compose up`
+    # by hand. `tail -f /dev/null` is a perpetual no-op precisely so this
+    # container is always there for `docker compose exec`, so it needs the
+    # same restart guarantee the other two services already have.
+    restart: unless-stopped
+    depends_on:
+      - wordpress
+    user: "33:33"
+    cpus: 0.5
+    mem_limit: 256m
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_NAME: __DB_NAME__
+      WORDPRESS_DB_USER: __DB_USER__
+      WORDPRESS_DB_PASSWORD: __DB_PASSWORD__
+      # Bug fix: wp-config.php's `WORDPRESS_CONFIG_EXTRA` block is `eval()`d
+      # fresh on every load by reading the *current process's* environment
+      # (`getenv_docker()`), not baked into the file once -- so even though
+      # `wordpress` and `wpcli` share the same wp-config.php via the html
+      # volume, wp-cli only sees this constant if it's also set here. Every
+      # WP-CLI-run plugin install (i.e. all of them) was hitting the stock
+      # 128M PHP limit until this line was added.
+      WORDPRESS_CONFIG_EXTRA: *config_extra
+    volumes:
+      # Shares the *entire* webroot with `wordpress`, not just wp-content --
+      # wp-cli needs to see wp-load.php etc. to do anything at all. Both
+      # services mounting the same named volume at /var/www/html is what
+      # makes `docker compose exec wpcli wp ...` operate on the live site.
+      - __PREFIX__-wp-html:/var/www/html
+    networks:
+      - __PREFIX__-net
+    entrypoint: ["tail", "-f", "/dev/null"] # kept alive so the agent can `docker compose exec` wp-cli commands into it
+
+  db:
+    image: mariadb:11.4
+    container_name: __PREFIX__-db
+    restart: unless-stopped
+    cpus: 1.0
+    mem_limit: 512m
+    environment:
+      MARIADB_ROOT_PASSWORD: __DB_ROOT_PASSWORD__
+      MARIADB_DATABASE: __DB_NAME__
+      MARIADB_USER: __DB_USER__
+      MARIADB_PASSWORD: __DB_PASSWORD__
+    volumes:
+      - __PREFIX__-db-data:/var/lib/mysql
+    networks:
+      - __PREFIX__-net
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+networks:
+  __PREFIX__-net:
+    name: __PREFIX__-net
+
+volumes:
+  __PREFIX__-wp-html:
+    name: __PREFIX__-wp-html
+  __PREFIX__-db-data:
+    name: __PREFIX__-db-data

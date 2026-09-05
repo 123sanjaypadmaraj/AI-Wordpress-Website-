@@ -1,0 +1,24 @@
+{
+  "name": "ai-wordpress-builder",
+  "private": true,
+  "version": "0.1.0",
+  "description": "AI-native website builder that operates real WordPress via Docker.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev -w apps/web",
+    "dev:agent": "npm run dev -w apps/agent",
+    "build": "npm run build -w packages/shared && npm run build -w apps/agent && npm run build -w apps/web",
+    "typecheck": "npm run typecheck -w packages/shared && npm run typecheck -w apps/agent && npm run typecheck -w apps/web",
+    "test:e2e": "playwright test -c tests/e2e/playwright.config.ts",
+    "test:e2e:install": "playwright install --with-deps chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

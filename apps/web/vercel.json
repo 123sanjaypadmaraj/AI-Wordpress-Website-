@@ -1,0 +1,6 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "installCommand": "cd ../.. && PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install",
+  "buildCommand": "cd ../.. && npm run build -w packages/shared -w apps/web"
+}

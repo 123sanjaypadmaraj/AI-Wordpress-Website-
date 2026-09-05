@@ -1,0 +1,33 @@
+# FND-06: local Postgres for the *application* database (project metadata,
+# chat history, checkpoints/backups) -- separate from the per-project
+# WordPress/MariaDB stacks under infrastructure/docker/projects/, which
+# stay MySQL-compatible per the spec (section 58).
+#
+# Usage:
+#   docker compose -f infrastructure/docker/postgres/docker-compose.yml up -d
+#   # then in apps/agent/.env:
+#   DATABASE_URL=postgres://ai_wp:ai_wp_dev@localhost:5433/ai_wp_builder
+name: ai-wp-app-db
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ai-wp-app-postgres
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5433:5432"
+    environment:
+      POSTGRES_USER: ai_wp
+      POSTGRES_PASSWORD: ai_wp_dev
+      POSTGRES_DB: ai_wp_builder
+    volumes:
+      - ai-wp-app-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ai_wp -d ai_wp_builder"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  ai-wp-app-db-data:
+    name: ai-wp-app-db-data
