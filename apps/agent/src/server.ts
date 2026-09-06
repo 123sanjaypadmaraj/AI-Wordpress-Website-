@@ -6,10 +6,13 @@ import cors from "cors";
 import { projectsRouter } from "./routes/projects.js";
 import { messagesRouter } from "./routes/messages.js";
 import { themesRouter } from "./routes/themes.js";
+import { contentRouter } from "./routes/content.js";
 import { initStore } from "./db/store.js";
+import { pickProvider } from "./llm/client.js";
 
 // Minimal .env loader (apps/agent/.env, see .env.example) so ANTHROPIC_API_KEY
-// can be set without pulling in a dotenv dependency for one file.
+// (or GEMINI_API_KEY / GROQ_API_KEY) can be set without pulling in a dotenv
+// dependency for one file.
 function loadEnvFile() {
   const path = join(dirname(fileURLToPath(import.meta.url)), "..", ".env");
   if (!existsSync(path)) return;
@@ -44,10 +47,14 @@ app.get("/health", (_req, res) => res.json({ ok: true, service: "ai-wp-agent" })
 app.use("/projects", projectsRouter);
 app.use("/projects", messagesRouter);
 app.use("/projects", themesRouter);
+app.use("/projects", contentRouter);
 
 const PORT = Number(process.env.PORT ?? 4001);
 await initStore();
 app.listen(PORT, () => {
   console.log(`[agent] listening on http://localhost:${PORT}`);
-  console.log(`[agent] AI mode: ${process.env.ANTHROPIC_API_KEY ? "Claude-assisted" : "heuristic (set ANTHROPIC_API_KEY to enable Claude)"}`);
+  const provider = pickProvider();
+  console.log(
+    `[agent] AI mode: ${provider ? `${provider}-assisted` : "heuristic (set ANTHROPIC_API_KEY, GEMINI_API_KEY, or GROQ_API_KEY to enable AI)"}`,
+  );
 });

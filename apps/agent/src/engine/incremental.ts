@@ -1,12 +1,16 @@
-import type { Project } from "@ai-wp/shared";
+import type { Project, SiteSpecification } from "@ai-wp/shared";
 import type { EditIntent } from "./editIntent.js";
 import { callTool } from "../tools/dispatcher.js";
 import { createCheckpoint, restoreCheckpoint } from "../tools/checkpoint.js";
 import { generateAndActivateChildTheme, regenerateChildThemeStyles } from "../tools/childtheme.js";
-import { THEME_CATALOG } from "./themes.js";
+import { resolveThemeName } from "./themes.js";
+import { heuristicDesignSystem } from "./designSystem.js";
 import { generateCopy } from "./copywriter.js";
+import { generateSupportingContent } from "./contentGenerator.js";
 import { buildPageContent } from "./templates.js";
+import { planPageLayout, bonusContentKeys } from "./layout.js";
 import { restartEnvironment } from "../docker/compose.js";
+import { getContactFormId } from "../tools/wordpress.js";
 import { FEATURE_PLUGIN_MAP } from "../tools/plugins.js";
 import { store } from "../db/store.js";
 
@@ -27,8 +31,7 @@ export interface IncrementalResult {
 }
 
 function parentThemeName(project: Project): string {
-  const slug = project.spec.theme.selected;
-  return THEME_CATALOG.find((t) => t.slug === slug)?.name ?? slug ?? "theme";
+  return resolveThemeName(project);
 }
 
 /**
@@ -48,6 +51,29 @@ async function applyDesignChange(project: Project): Promise<void> {
   project.spec.theme.use_child_theme = true; // either path leaves the (now up to date) child theme active
 }
 
+/**
+ * GEN-10: settings-form-driven design edits (secondary color, heading/body
+ * font, corner radius) -- unlike change_color/change_style, these aren't
+ * things a chat message naturally expresses ("make the heading font
+ * Playfair Display" is a plausible thing to type, but not one worth adding
+ * NLU for yet), so this is called directly from routes/projects.ts's PATCH
+ * /spec rather than being an EditIntent. Same checkpoint-first/rebuild-CSS
+ * shape as applyDesignChange above.
+ */
+export async function applyDesignFieldsChange(
+  project: Project,
+  patch: Partial<Pick<SiteSpecification["design"], "secondary_color" | "heading_font" | "body_font" | "radius">>,
+): Promise<IncrementalResult> {
+  if (project.docker.status !== "running") {
+    return { summary: "The environment isn't running, so I can't apply that change right now.", ok: false };
+  }
+  await createCheckpoint(project, "before: change_design", "auto").catch(() => undefined);
+  Object.assign(project.spec.design, patch);
+  await applyDesignChange(project);
+  store.saveProject(project);
+  return { summary: "Updated the design system.", ok: true };
+}
+
 export async function applyEditIntent(project: Project, intent: EditIntent): Promise<IncrementalResult> {
   if (intent.kind === "unknown") return { summary: "", ok: false };
 
@@ -65,8 +91,11 @@ export async function applyEditIntent(project: Project, intent: EditIntent): Pro
         return { summary: `"${intent.title}" already exists as a page.`, ok: true };
       }
       const copy = await generateCopy(intent.slug, project.spec);
-      const hasContactFormPlugin = project.spec.features.includes("contact-form");
-      const content = buildPageContent(intent.slug, project.spec, copy, { hasContactFormPlugin });
+      const layout = await planPageLayout(intent.slug, project.spec);
+      const supportingContent = await generateSupportingContent(intent.slug, project.spec, bonusContentKeys(layout.bonus));
+      const contactFormId = project.spec.features.includes("contact-form") ? await getContactFormId(project) : null;
+      const hasWooCommerce = project.spec.features.includes("ecommerce");
+      const content = buildPageContent(intent.slug, project.spec, copy, { contactFormId, hasWooCommerce, content: supportingContent, layout });
       await callTool(project, "create_page", { title: intent.title, slug: intent.slug, content }, { source: "chat" });
       project.spec.pages.push(intent.slug);
       await callTool(project, "create_menu", { name: "Primary", pageSlugs: project.spec.pages }, { source: "chat" });
@@ -94,6 +123,11 @@ export async function applyEditIntent(project: Project, intent: EditIntent): Pro
     case "change_style": {
       project.spec.design.style = intent.style;
       if (intent.style === "futuristic") project.spec.design.mode = "dark";
+      // GEN-10: a style change should re-pick the preset it implies (font
+      // pairing + corner radius), not just flip the `style` label while the
+      // rest of the design system quietly keeps whatever it had before.
+      const preset = heuristicDesignSystem(project.spec.design.style, project.spec.site.type, project.spec.design.primary_color, project.spec.design.mode);
+      Object.assign(project.spec.design, preset);
       await applyDesignChange(project);
       store.saveProject(project);
       return { summary: `Switched the visual style to "${intent.style}".`, ok: true };
@@ -110,6 +144,19 @@ export async function applyEditIntent(project: Project, intent: EditIntent): Pro
       }
       store.saveProject(project);
       return { summary: `Enabled "${intent.feature}"${slug ? ` (installed ${slug})` : ""}.`, ok: true };
+    }
+
+    case "add_skill": {
+      if (project.spec.discoveredSkills.some((s) => s.slug === intent.slug)) {
+        return { summary: `"${intent.name}" is already installed.`, ok: true };
+      }
+      await callTool(project, "install_plugin", { slug: intent.slug }, { source: "chat" });
+      project.spec.discoveredSkills.push({ slug: intent.slug, name: intent.name, query: intent.query, source: "wordpress.org" });
+      store.saveProject(project);
+      return {
+        summary: `Installed "${intent.name}" (WordPress.org plugin directory) for "${intent.query}".`,
+        ok: true,
+      };
     }
 
     case "restart_environment": {

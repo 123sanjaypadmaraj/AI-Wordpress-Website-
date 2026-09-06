@@ -6,15 +6,15 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        canvas: "#F7F7FA",
-        surface: "#FFFFFF",
-        "surface-alt": "#EDEEF3",
-        border: "#DBDCE6",
-        ink: "#1B1D29",
-        "ink-muted": "#5B5E72",
+        canvas: "#0F1117",
+        surface: "#171A23",
+        "surface-alt": "#1F2230",
+        border: "#2B2E3D",
+        ink: "#E8E9F1",
+        "ink-muted": "#8B8FA8",
         accent: {
-          DEFAULT: "#3651D4",
-          soft: "#E7EAFC",
+          DEFAULT: "#5B6EF5",
+          soft: "#1E2242",
         },
       },
       fontFamily: {

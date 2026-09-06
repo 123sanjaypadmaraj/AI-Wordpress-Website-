@@ -28,7 +28,9 @@ out to `docker compose` per project -- see `infrastructure/docker/`). Set:
 
 - `PORT` (defaults to 4001)
 - `DATABASE_URL` (optional -- omit to use the zero-config JSON file store)
-- `ANTHROPIC_API_KEY` (optional -- omit to fall back to local heuristics)
+- `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` / `GROQ_API_KEY` (optional -- set
+  one to enable AI assistance, omit all to fall back to local heuristics;
+  see `apps/agent/src/llm/client.ts` and `AI_PROVIDER` if more than one is set)
 
 `apps/agent` currently allows CORS from any origin (`app.use(cors())` in
 `apps/agent/src/server.ts`). Once the Vercel URL is known, consider

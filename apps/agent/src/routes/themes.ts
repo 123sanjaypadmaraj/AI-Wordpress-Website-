@@ -33,8 +33,12 @@ themesRouter.post("/:id/themes/select", (req, res) => {
     const variant = rec?.variants?.find((v) => v.id === variantId);
     if (variant) {
       project.spec.design.primary_color = variant.primary_color;
+      project.spec.design.secondary_color = variant.secondary_color;
       project.spec.design.mode = variant.mode;
-      project.spec.design.font = variant.font;
+      project.spec.design.heading_font = variant.heading_font;
+      project.spec.design.body_font = variant.body_font;
+      project.spec.design.radius = variant.radius;
+      project.spec.design.preset = variant.preset;
     }
   }
 

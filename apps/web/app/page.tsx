@@ -78,7 +78,7 @@ export default function DashboardPage() {
       </form>
 
       {error && (
-        <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+        <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">
           {error} -- is the agent server running (<code className="font-mono">npm run dev:agent</code>)?
         </div>
       )}
@@ -128,7 +128,7 @@ export default function DashboardPage() {
               <button onClick={() => duplicate(p.id)} className="rounded-md border border-border px-2.5 py-1 hover:border-accent hover:text-accent">
                 Duplicate
               </button>
-              <button onClick={() => remove(p.id)} className="rounded-md border border-border px-2.5 py-1 text-rose-600 hover:border-rose-300 hover:bg-rose-50">
+              <button onClick={() => remove(p.id)} className="rounded-md border border-border px-2.5 py-1 text-rose-400 hover:border-rose-500/50 hover:bg-rose-500/10">
                 Delete
               </button>
             </div>

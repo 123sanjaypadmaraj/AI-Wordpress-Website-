@@ -1,6 +1,8 @@
 import type {
   AuditLogEntry,
   ChatChoice,
+  CmsPageDetail,
+  CmsPageSummary,
   Message,
   Project,
   ProjectBackup,
@@ -80,6 +82,17 @@ export const api = {
   exportDownloadUrl: (id: string, relativePath: string) => `${AGENT_URL}/projects/${id}/export/${relativePath}`,
 
   screenshotUrl: (id: string, relativePath: string) => `${AGENT_URL}/projects/${id}/screenshots/${relativePath}`,
+
+  // CMS-01: content editor
+  listPages: (id: string) => request<CmsPageSummary[]>(`/projects/${id}/pages`),
+  getPage: (id: string, pageId: number) => request<CmsPageDetail>(`/projects/${id}/pages/${pageId}`),
+  savePage: (id: string, pageId: number, patch: { title?: string; content?: string }) =>
+    request<CmsPageDetail>(`/projects/${id}/pages/${pageId}`, { method: "PUT", body: JSON.stringify(patch) }),
+  aiDraftPage: (id: string, pageId: number, instruction: string) =>
+    request<{ title: string; content: string }>(`/projects/${id}/pages/${pageId}/ai-draft`, {
+      method: "POST",
+      body: JSON.stringify({ instruction }),
+    }),
 
   agentUrl: AGENT_URL,
 };

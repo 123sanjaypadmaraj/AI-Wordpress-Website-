@@ -42,11 +42,20 @@ export interface SiteSpecification {
   };
   pages: string[];
   features: string[]; // e.g. "event-registration", "contact-form", "ecommerce"
+  // GEN-10: full design system, not just a single accent color. `preset`
+  // names which curated font-pairing/radius bundle (engine/designSystem.ts)
+  // this came from; heuristic keyword match by default, upgraded to an
+  // AI-informed pick (secondary color included) when a provider is
+  // configured -- see requirements.ts/routes/messages.ts.
   design: {
     style: string; // e.g. "minimal", "futuristic", "corporate"
     mode: "light" | "dark";
     primary_color: string;
-    font: string;
+    secondary_color: string;
+    heading_font: string;
+    body_font: string;
+    radius: "sharp" | "soft" | "pill";
+    preset: string; // e.g. "minimal", "bold", "playful", "corporate", "editorial"
   };
   theme: {
     selected: string | null;
@@ -60,6 +69,19 @@ export interface SiteSpecification {
   seo: boolean;
   accessibility: boolean;
   integrations: string[]; // e.g. "google-analytics", "mailchimp"
+  // Plugin "skills" resolved live against the public WordPress.org plugin
+  // directory when a chat message names a capability that isn't in the
+  // curated FEATURE_PLUGIN_MAP (apps/agent/src/tools/plugins.ts) -- see
+  // apps/agent/src/engine/skills.ts. Separate from `features` because these
+  // aren't part of the fixed, offline keyword vocabulary.
+  discoveredSkills: DiscoveredSkillRef[];
+}
+
+export interface DiscoveredSkillRef {
+  slug: string;
+  name: string;
+  query: string; // the phrase from the user's message that triggered the lookup
+  source: "wordpress.org";
 }
 
 export function emptySiteSpecification(name = "Untitled Project"): SiteSpecification {
@@ -67,12 +89,22 @@ export function emptySiteSpecification(name = "Untitled Project"): SiteSpecifica
     site: { name, type: "", industry: "", audience: [] },
     pages: [],
     features: [],
-    design: { style: "", mode: "light", primary_color: "#3651D4", font: "Inter" },
+    design: {
+      style: "",
+      mode: "light",
+      primary_color: "#3651D4",
+      secondary_color: "#1E8E5A",
+      heading_font: "Inter",
+      body_font: "Inter",
+      radius: "soft",
+      preset: "minimal",
+    },
     theme: { selected: null, use_child_theme: true },
     ecommerce: { payment: null },
     seo: false,
     accessibility: false,
     integrations: [],
+    discoveredSkills: [],
   };
 }
 
@@ -92,6 +124,10 @@ export interface RequirementSlots {
   seo: boolean | null;
   accessibility: boolean | null;
   integrations: string[] | null;
+  // Accumulates opportunistically, same as colorPreference/ecommercePayment --
+  // never gated behind a NEXT_QUESTIONS prompt, so it's never "still
+  // unanswered" the way a null slot is; starts and can stay empty forever.
+  discoveredSkills: DiscoveredSkillRef[] | null;
 }
 
 export const EMPTY_SLOTS: RequirementSlots = {
@@ -105,6 +141,7 @@ export const EMPTY_SLOTS: RequirementSlots = {
   seo: null,
   accessibility: null,
   integrations: null,
+  discoveredSkills: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -140,6 +177,7 @@ export interface ThemeDefinition {
   maturity: number; // 0-1, heuristic
   requiredPlugins: string[];
   description: string;
+  screenshotUrl?: string; // small preview image shown next to the option (THM-04/THM-05)
 }
 
 export interface ThemeRecommendation {
@@ -151,13 +189,20 @@ export interface ThemeRecommendation {
 }
 
 // THM-05: named design-system tweaks a user can preview and pick before the
-// build kicks off, without standing up N separate WordPress instances.
+// build kicks off, without standing up N separate WordPress instances. GEN-10
+// widened this from a single color+font swap to a full design-system bundle
+// (see engine/designSystem.ts's DESIGN_PRESETS) so picking a variant is
+// actually picking a distinct look, not just a different accent color.
 export interface ThemeVariant {
   id: string;
   label: string;
   primary_color: string;
+  secondary_color: string;
   mode: "light" | "dark";
-  font: string;
+  heading_font: string;
+  body_font: string;
+  radius: "sharp" | "soft" | "pill";
+  preset: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -307,6 +352,23 @@ export interface LogEntry {
   timestamp: string;
   message: string;
   level: "info" | "warn" | "error";
+}
+
+// ---------------------------------------------------------------------------
+// CMS-01: manual + AI-assisted page content editing (post-build). Backed by
+// the site's real WordPress pages -- these are read live from WP-CLI, not a
+// separate content store, so the editor and the live site can never drift.
+// ---------------------------------------------------------------------------
+
+export interface CmsPageSummary {
+  id: number;
+  title: string;
+  slug: string;
+  status: string;
+}
+
+export interface CmsPageDetail extends CmsPageSummary {
+  content: string; // raw Gutenberg block HTML, the same shape `post_content` already uses
 }
 
 export interface ProjectSummary {

@@ -29,8 +29,13 @@ introduced this repo.
   transient Docker/WP-CLI failures.
 - Page content is composed from a section-level template library (hero,
   features, stats, CTA, pricing, team, testimonials) filled with AI- or
-  heuristically-generated copy, styled by a generated child theme that
-  applies the AI-derived design system as real CSS.
+  heuristically-generated copy. Which optional sections a page like Home,
+  About, or Services actually gets, and in what order, is itself an AI (or
+  heuristic-fallback) layout decision -- not a one-size-fits-all template --
+  and the whole thing is styled by a generated child theme applying a full
+  AI-derived design system (primary + secondary color, a heading/body font
+  pairing, and a corner-radius personality, not just one accent color) as
+  real CSS.
 - Plugins are installed and minimally configured based on the site's
   features (WooCommerce, Contact Form 7's absence noted honestly, Yoast
   SEO, MailPoet, Events Manager, WP Accessibility, caching, spam
@@ -40,6 +45,14 @@ introduced this repo.
   applied as a single targeted change, not a full rebuild -- with an
   automatic checkpoint before every edit and an "undo" that restores it
   (spec snapshot + real database restore).
+- A Content tab (CMS-01) lists every page on the live site and lets you edit
+  its title and body directly -- reading and writing straight through
+  WP-CLI, so it can never drift from the real site -- plus an "Ask AI to
+  edit this page" box that drafts a rewrite from a plain-English instruction
+  for you to review before saving. Manual and AI-drafted saves both go
+  through the same dispatcher-audited path as every other edit, with an
+  automatic checkpoint first. A per-page link out to the real WordPress
+  block editor covers anything the raw content view doesn't.
 - An automated smoke-test suite (Playwright: page loads, nav resolves,
   forms present, no console errors) and a screenshot + AI/heuristic visual
   critique run automatically after generation, with one bounded auto-fix
@@ -50,10 +63,12 @@ introduced this repo.
 - Per-project Docker isolation: own network, own volumes, own allocated
   port, own CPU/memory limits.
 - Requirement extraction (and now edit-intent classification) runs on
-  local heuristics by default, and upgrades to Claude automatically when
-  `ANTHROPIC_API_KEY` is set -- including token-streamed chat replies over
-  SSE and an AI-authored visual critique instead of the heuristic-only
-  fallback.
+  local heuristics by default, and upgrades to a real model automatically
+  when an API key is set for any supported provider -- Claude
+  (`ANTHROPIC_API_KEY`), Gemini (`GEMINI_API_KEY`), or Groq (`GROQ_API_KEY`),
+  see `apps/agent/src/llm/client.ts` -- including token-streamed chat
+  replies over SSE and an AI-authored visual critique instead of the
+  heuristic-only fallback.
 - Persistence is a JSON file by default; set `DATABASE_URL` to use
   Postgres instead (a local instance is one `docker compose` away -- see
   `infrastructure/docker/postgres/`).
@@ -87,10 +102,11 @@ Progress tab streams the pipeline log; the Preview tab embeds the live
 site once it's ready. From there, keep chatting -- edits are applied
 directly to the live site.
 
-To enable Claude-assisted requirement extraction, edit classification, and
-visual critique instead of the keyword/heuristic fallbacks, set
-`ANTHROPIC_API_KEY` before starting the agent (see
-`apps/agent/.env.example`).
+To enable AI-assisted requirement extraction, edit classification,
+copywriting, and visual critique instead of the keyword/heuristic
+fallbacks, set one of `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or
+`GROQ_API_KEY` before starting the agent (see `apps/agent/.env.example`).
+If more than one is set, `AI_PROVIDER` picks which is used.
 
 ## Repository layout
 

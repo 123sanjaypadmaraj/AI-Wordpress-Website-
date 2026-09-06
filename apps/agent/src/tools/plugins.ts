@@ -1,5 +1,6 @@
 import type { Project } from "@ai-wp/shared";
 import { activatePlugin, installPlugin, updateOption, wpEval } from "./wordpress.js";
+import { isDiscoveredSkillPlugin } from "../engine/skills.js";
 
 /**
  * Plugin management (spec section 14, backlog epic PLG).
@@ -34,8 +35,9 @@ export const ALLOWED_PLUGINS: PluginDefinition[] = [
 
 const ALLOWED_SLUGS = new Set(ALLOWED_PLUGINS.map((p) => p.slug));
 
+/** PLG-01 + live skill packs: the static catalog, plus anything engine/skills.ts has verified against the public WordPress.org plugin directory this run. */
 export function isAllowedPlugin(slug: string): boolean {
-  return ALLOWED_SLUGS.has(slug);
+  return ALLOWED_SLUGS.has(slug) || isDiscoveredSkillPlugin(slug);
 }
 
 /** PLG-02: spec.features / flags -> plugin slug. A feature with no entry here needs no plugin (e.g. "blog" is core). */

@@ -1,4 +1,5 @@
-import type { SiteSpecification, ThemeDefinition, ThemeRecommendation, ThemeVariant } from "@ai-wp/shared";
+import type { Project, SiteSpecification, ThemeDefinition, ThemeRecommendation, ThemeVariant } from "@ai-wp/shared";
+import { presetById, deriveSecondaryColor } from "./designSystem.js";
 
 /**
  * Theme discovery + recommendation (spec sections 10-11).
@@ -7,12 +8,19 @@ import type { SiteSpecification, ThemeDefinition, ThemeRecommendation, ThemeVari
  * themes from the official WordPress.org repository over page-builder
  * ecosystems (Elementor/Divi), which need their own adapter later.
  *
- * This catalog is intentionally small and curated rather than a live
- * WordPress.org API search -- the real discovery call (`wp theme search`
- * over WP-CLI, or the themes.wordpress.org API) is a drop-in replacement
- * for THEME_CATALOG once the tool layer talks to a real environment; the
- * scoring function below doesn't care where the candidates came from.
+ * THEME_CATALOG below is a small, hand-curated seed list -- mainly an
+ * offline-safe floor (see THM-04 below) and a set of well-understood
+ * defaults the scorer can lean on. It is deliberately NOT the main source
+ * of what a user sees: recommendThemes() merges it with a live search of
+ * the real themes.wordpress.org repository so the Themes tab shows a wide,
+ * directly-imported catalog rather than just these six. The scoring
+ * function doesn't care where a candidate came from.
  */
+
+/** WordPress.org serves every hosted theme's screenshot from this predictable CDN path. */
+function wpOrgScreenshotUrl(slug: string): string {
+  return `https://ps.w.org/${slug}/screenshot.png`;
+}
 
 export const THEME_CATALOG: ThemeDefinition[] = [
   {
@@ -24,6 +32,7 @@ export const THEME_CATALOG: ThemeDefinition[] = [
     maturity: 0.95,
     requiredPlugins: [],
     description: "WordPress's default full-site-editing theme. Extremely flexible block patterns, near-universal compatibility.",
+    screenshotUrl: wpOrgScreenshotUrl("twentytwentyfour"),
   },
   {
     slug: "astra",
@@ -34,6 +43,7 @@ export const THEME_CATALOG: ThemeDefinition[] = [
     maturity: 0.98,
     requiredPlugins: ["woocommerce"],
     description: "One of the most widely deployed WP themes. Lightweight, fast, deep starter-template library.",
+    screenshotUrl: wpOrgScreenshotUrl("astra"),
   },
   {
     slug: "blocksy",
@@ -44,6 +54,7 @@ export const THEME_CATALOG: ThemeDefinition[] = [
     maturity: 0.9,
     requiredPlugins: ["woocommerce"],
     description: "Modern block-first theme with strong header/footer builder and a large pattern library.",
+    screenshotUrl: wpOrgScreenshotUrl("blocksy"),
   },
   {
     slug: "generatepress",
@@ -54,6 +65,7 @@ export const THEME_CATALOG: ThemeDefinition[] = [
     maturity: 0.95,
     requiredPlugins: [],
     description: "Extremely lightweight, developer-favorite theme known for performance and clean markup.",
+    screenshotUrl: wpOrgScreenshotUrl("generatepress"),
   },
   {
     slug: "neve",
@@ -64,6 +76,7 @@ export const THEME_CATALOG: ThemeDefinition[] = [
     maturity: 0.85,
     requiredPlugins: [],
     description: "Fast, mobile-first theme with starter sites geared toward startups and creative agencies.",
+    screenshotUrl: wpOrgScreenshotUrl("neve"),
   },
   {
     slug: "oceanwp",
@@ -74,6 +87,7 @@ export const THEME_CATALOG: ThemeDefinition[] = [
     maturity: 0.9,
     requiredPlugins: ["woocommerce"],
     description: "Feature-rich multipurpose theme with strong WooCommerce integration out of the box.",
+    screenshotUrl: wpOrgScreenshotUrl("oceanwp"),
   },
 ];
 
@@ -121,6 +135,20 @@ export function isAllowedTheme(slug: string): boolean {
   return catalogSlugs.has(slug) || liveDiscoveredSlugs.has(slug);
 }
 
+/**
+ * Display name for a selected theme slug. Most selections are now live
+ * WordPress.org imports that never appear in THEME_CATALOG, so look at the
+ * project's own recommendations (where the real `name` from the wp.org API
+ * was captured) before falling back to the curated catalog or the bare slug.
+ */
+export function resolveThemeName(project: Pick<Project, "spec" | "themeRecommendations">, slug?: string): string {
+  const themeSlug = slug ?? project.spec.theme.selected;
+  if (!themeSlug) return "theme";
+  const fromRecommendation = project.themeRecommendations?.find((r) => r.theme.slug === themeSlug)?.theme.name;
+  const fromCatalog = THEME_CATALOG.find((t) => t.slug === themeSlug)?.name;
+  return fromRecommendation ?? fromCatalog ?? themeSlug;
+}
+
 // ---------------------------------------------------------------------------
 // THM-04: live WordPress.org theme search, merged with the curated catalog.
 // Falls back to catalog-only (returns []) on any network failure/timeout so
@@ -136,6 +164,7 @@ interface WpOrgThemeApiResult {
   rating?: number;
   active_installs?: number;
   requires_plugins?: string[];
+  screenshot_url?: string;
 }
 
 const searchCache = new Map<string, { at: number; results: ThemeDefinition[] }>();
@@ -176,6 +205,7 @@ export async function fetchWordPressOrgThemes(query: string, limit = 6): Promise
     url.searchParams.set("request[per_page]", String(limit));
     url.searchParams.set("request[fields][description]", "1");
     url.searchParams.set("request[fields][tags]", "1");
+    url.searchParams.set("request[fields][screenshot_url]", "1");
 
     const res = await fetch(url, { signal: controller.signal });
     if (!res.ok) return [];
@@ -195,6 +225,7 @@ export async function fetchWordPressOrgThemes(query: string, limit = 6): Promise
           maturity: Math.min(1, (t.rating ?? 60) / 100),
           requiredPlugins: [],
           description: (t.description ?? "").replace(/<[^>]*>/g, "").slice(0, 220),
+          screenshotUrl: t.screenshot_url || wpOrgScreenshotUrl(t.slug),
         };
       });
     searchCache.set(cacheKey, { at: Date.now(), results });
@@ -215,19 +246,70 @@ export async function fetchWordPressOrgThemes(query: string, limit = 6): Promise
 
 const ACCENT_PALETTE = ["#3651D4", "#1E8E5A", "#C43D4B", "#B8790A", "#6D3FD1", "#1A9E8F"];
 
+/**
+ * GEN-10: each variant is now a full design-system bundle (one of
+ * designSystem.ts's curated presets, with its own mode/radius/font pairing)
+ * rather than just a different primary color -- picking a variant actually
+ * picks a distinct look, not a re-tinted version of the same one. The three
+ * labels (Bold/Minimal/Classic) are kept stable since the frontend and any
+ * saved project already key off them, but what's behind each is richer.
+ */
 export function buildDesignVariants(spec: SiteSpecification): ThemeVariant[] {
   const base = spec.design.primary_color;
   const others = ACCENT_PALETTE.filter((c) => c.toLowerCase() !== base.toLowerCase());
-  return [
-    { id: "bold", label: "Bold", primary_color: others[0] ?? base, mode: "dark", font: "Inter" },
-    { id: "minimal", label: "Minimal", primary_color: "#1B1D29", mode: "light", font: "IBM Plex Sans" },
-    { id: "classic", label: "Classic", primary_color: others[1] ?? base, mode: "light", font: "Georgia" },
+
+  const bundles: Array<{ id: string; label: string; presetId: string; primary_color: string; mode: "light" | "dark" }> = [
+    { id: "bold", label: "Bold", presetId: "bold", primary_color: others[0] ?? base, mode: "dark" },
+    { id: "minimal", label: "Minimal", presetId: "minimal", primary_color: "#1B1D29", mode: "light" },
+    { id: "classic", label: "Classic", presetId: "editorial", primary_color: others[1] ?? base, mode: "light" },
   ];
+
+  return bundles.map(({ id, label, presetId, primary_color, mode }) => {
+    const preset = presetById(presetId);
+    return {
+      id,
+      label,
+      primary_color,
+      secondary_color: deriveSecondaryColor(primary_color, mode),
+      mode,
+      heading_font: preset.headingFont,
+      body_font: preset.bodyFont,
+      radius: preset.radius,
+      preset: preset.id,
+    };
+  });
 }
 
-export async function recommendThemes(spec: SiteSpecification, limit = 3): Promise<ThemeRecommendation[]> {
+// Default result count and per-query live fetch size are both overridable
+// so an operator can dial them without a code change; the important part is
+// the *default* is now "browse a real WordPress.org catalog", not "here are
+// the 3 best of a 6-theme handwritten shortlist".
+const DEFAULT_RESULT_LIMIT = Number(process.env.THEME_RESULT_LIMIT) || 24;
+const DEFAULT_LIVE_FETCH_LIMIT = Number(process.env.THEME_LIVE_FETCH_LIMIT) || 30;
+
+export async function recommendThemes(
+  spec: SiteSpecification,
+  limit = DEFAULT_RESULT_LIMIT,
+): Promise<ThemeRecommendation[]> {
   const useLive = process.env.THEME_SOURCE !== "catalog";
-  const live = useLive ? await fetchWordPressOrgThemes(spec.site.type || spec.design.style || "wordpress", 6) : [];
+
+  // Search WordPress.org from a few angles (site type, visual style, and a
+  // bare "wordpress" query for general popular coverage) rather than one
+  // narrow term, then dedupe by slug -- this is what actually gets the user
+  // "way more themes" instead of six curated ones plus a thin single-query tail.
+  const queries = Array.from(new Set([spec.site.type, spec.design.style, "wordpress"].filter(Boolean))) as string[];
+  const liveBatches = useLive
+    ? await Promise.all(queries.map((q) => fetchWordPressOrgThemes(q, DEFAULT_LIVE_FETCH_LIMIT)))
+    : [];
+  const seenLiveSlugs = new Set<string>();
+  const live: ThemeDefinition[] = [];
+  for (const batch of liveBatches) {
+    for (const theme of batch) {
+      if (seenLiveSlugs.has(theme.slug)) continue;
+      seenLiveSlugs.add(theme.slug);
+      live.push(theme);
+    }
+  }
 
   const candidates = [
     ...THEME_CATALOG.map((t) => ({ theme: t, source: "catalog" as const })),

@@ -12,7 +12,7 @@ import { destroyEnvironment, restartEnvironment, startEnvironment, stopEnvironme
 import { createBackup, createCheckpoint, restoreBackup, restoreCheckpoint } from "../tools/checkpoint.js";
 import { exportProject, exportsListDir } from "../tools/export.js";
 import { readScreenshot } from "../tools/screenshot.js";
-import { applyEditIntent } from "../engine/incremental.js";
+import { applyEditIntent, applyDesignFieldsChange } from "../engine/incremental.js";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
@@ -105,6 +105,32 @@ projectsRouter.patch("/:id/spec", async (req, res) => {
   }
   if (patch.design?.style && patch.design.style !== project.spec.design.style) {
     await tryApply({ kind: "change_style", style: patch.design.style });
+  }
+  // GEN-10: the rest of the design-system axes aren't EditIntents (see
+  // applyDesignFieldsChange's own doc comment) -- applied directly here as
+  // one combined change so a settings-form save that touches several of
+  // them (e.g. both fonts at once) only re-ships the child theme CSS once.
+  const designFieldPatch: Partial<SiteSpecification["design"]> = {};
+  if (patch.design?.secondary_color && patch.design.secondary_color !== project.spec.design.secondary_color) {
+    designFieldPatch.secondary_color = patch.design.secondary_color;
+  }
+  if (patch.design?.heading_font && patch.design.heading_font !== project.spec.design.heading_font) {
+    designFieldPatch.heading_font = patch.design.heading_font;
+  }
+  if (patch.design?.body_font && patch.design.body_font !== project.spec.design.body_font) {
+    designFieldPatch.body_font = patch.design.body_font;
+  }
+  if (patch.design?.radius && patch.design.radius !== project.spec.design.radius) {
+    designFieldPatch.radius = patch.design.radius;
+  }
+  if (Object.keys(designFieldPatch).length > 0) {
+    try {
+      const r = await applyDesignFieldsChange(project, designFieldPatch);
+      if (r.ok) applied.push(r.summary);
+      else if (r.summary) errors.push(r.summary);
+    } catch (err) {
+      errors.push(err instanceof Error ? err.message : String(err));
+    }
   }
   if (patch.pages) {
     for (const slug of patch.pages) {

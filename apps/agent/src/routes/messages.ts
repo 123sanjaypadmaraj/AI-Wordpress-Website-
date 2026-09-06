@@ -1,16 +1,17 @@
 import { Router } from "express";
 import { nanoid } from "nanoid";
-import Anthropic from "@anthropic-ai/sdk";
 import type { ChatChoice, Message, Project } from "@ai-wp/shared";
 import { store } from "../db/store.js";
 import { runRequirementTurn, buildSiteSpecification } from "../engine/requirements.js";
 import { recommendThemes } from "../engine/themes.js";
+import { buildDesignSystem } from "../engine/designSystem.js";
 import { classifyEditIntent } from "../engine/editIntent.js";
 import { applyEditIntent } from "../engine/incremental.js";
+import { aiAvailable, streamAck } from "../llm/client.js";
 
 export const messagesRouter = Router();
 
-const PRE_BUILD_STATES = new Set(["CREATED", "REQUIREMENTS", "SPECIFICATION_READY", "THEME_SELECTION"]);
+const PRE_BUILD_STATES = new Set(["CREATED", "REQUIREMENTS", "SPECIFICATION_READY"]);
 
 interface TurnResult {
   replyText: string;
@@ -32,11 +33,29 @@ async function handleTurn(project: Project, text: string): Promise<TurnResult> {
 
     if (result.specReady && project.status === "REQUIREMENTS") {
       project.status = "SPECIFICATION_READY";
+      // GEN-10: upgrade the heuristic design-system pick (requirements.ts)
+      // with an AI-informed one now that the full spec is known -- a no-op
+      // heuristic-preserving call when no provider is configured. Before the
+      // theme variants below are built, so THM-05's swatches reflect it.
+      project.spec.design = { ...project.spec.design, ...(await buildDesignSystem(project.spec)) };
       project.themeRecommendations = await recommendThemes(project.spec);
       project.status = "THEME_SELECTION";
     }
     store.saveProject(project);
     return { replyText: result.reply, choices: result.choices };
+  }
+
+  // The requirements conversation is done and a theme choice is pending --
+  // that happens in the Themes tab (BuilderSidePanel), not here. Without this
+  // branch THEME_SELECTION used to fall back into the requirement-gathering
+  // path above (it was in PRE_BUILD_STATES): since every slot was already
+  // filled, runRequirementTurn found nothing missing and just re-sent the
+  // same "I have everything I need" summary forever, no matter what the user
+  // typed -- "continue" never actually advanced anything. Nor should it fall
+  // into the edit-intent path below; that assumes a live site to edit, which
+  // doesn't exist yet at this stage.
+  if (project.status === "THEME_SELECTION") {
+    return { replyText: 'Pick a theme from the "Themes" tab to start the build -- there\'s nothing more to answer here yet.' };
   }
 
   const intent = await classifyEditIntent(text, project.spec);
@@ -115,26 +134,13 @@ messagesRouter.get("/:id/messages/stream", async (req, res) => {
   store.appendMessage(userMessage);
   send("user_message", userMessage);
 
-  // Stream Claude's own phrasing token-by-token when available, purely as a
-  // typing-indicator-with-content UX; the authoritative reply (and any
+  // Stream the model's own phrasing token-by-token when available, purely as
+  // a typing-indicator-with-content UX; the authoritative reply (and any
   // state change) is still computed by the same handleTurn() the POST
-  // endpoint uses, and arrives in the final "done" event.
-  if (process.env.ANTHROPIC_API_KEY) {
-    try {
-      const client = new Anthropic();
-      const stream = client.messages.stream({
-        model: "claude-sonnet-4-5",
-        max_tokens: 150,
-        system:
-          "You are a friendly AI website builder assistant. Reply in one short, warm sentence " +
-          "acknowledging the user's message about their website. Plain text only.",
-        messages: [{ role: "user", content: text }],
-      });
-      stream.on("text", (chunk) => send("delta", { text: chunk }));
-      await stream.finalMessage();
-    } catch {
-      // Non-fatal -- the "done" event below still carries the real reply.
-    }
+  // endpoint uses, and arrives in the final "done" event. Works with
+  // whichever provider is active -- see llm/client.ts.
+  if (aiAvailable()) {
+    await streamAck(text, (chunk) => send("delta", { text: chunk }));
   }
 
   let replyText: string;

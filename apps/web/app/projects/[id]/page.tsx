@@ -64,7 +64,7 @@ export default function ProjectBuilderPage() {
           <StatusBadge status={project.status} />
         </div>
       </div>
-      <div className="grid flex-1 grid-cols-1 gap-4 overflow-hidden lg:grid-cols-2">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-hidden lg:grid-cols-2">
         <ChatPanel project={project} onProjectUpdate={setProject} />
         <BuilderSidePanel project={project} onProjectUpdate={setProject} />
       </div>

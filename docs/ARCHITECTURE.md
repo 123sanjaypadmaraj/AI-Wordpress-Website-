@@ -14,8 +14,8 @@ apps/web (Next.js)                 apps/agent (Express)
                               │ status in {CREATED..THEME_SELECTION}?          │
                               ▼                                                ▼
                     engine/requirements.ts                       engine/editIntent.ts
-                    (heuristics, or Claude                       classify -> EditIntent
-                     if ANTHROPIC_API_KEY set)                   (add/remove page, change
+                    (heuristics, or an AI                        classify -> EditIntent
+                     provider -- see llm/client.ts)               (add/remove page, change
                               │                                   color/style, add feature,
                     buildSiteSpecification()                     restart, undo)
                               │                                                │
@@ -47,6 +47,15 @@ apps/web (Next.js)                 apps/agent (Express)
     engine/templates.ts + engine/copywriter.ts (GEN-03/04/05): section-level
     Gutenberg block templates (hero/features/stats/cta/pricing/team/...)
     filled with heuristic or Claude-generated copy, composed per page type.
+    engine/layout.ts (GEN-11) decides which *optional* sections (stats/
+    testimonials/faq/features/cta) a given page additionally earns and in
+    what order -- heuristic default, AI-informed pick when a provider is
+    configured -- rather than every page of a given type looking identical.
+    engine/designSystem.ts (GEN-10) is the same two-mode shape for
+    spec.design itself: a curated preset (font pairing + corner radius) plus
+    a mathematically-derived secondary color, upgraded to an AI-informed
+    preset/color pick once the spec is ready (routes/messages.ts) -- what
+    tools/childtheme.ts actually renders as CSS.
 
     engine/testRunner.ts (TST-01/02) + engine/critic.ts (TST-03/04): a
     Playwright smoke suite (page loads, nav resolves, forms, console errors)
@@ -98,6 +107,21 @@ allowlist (`post`, `option`, `theme`, `plugin`, `menu`, `core`, `cache`,
 `transient`) -- destructive one-off operations, not a general shell.
 `run_wordpress_api` (calling the REST API directly, as opposed to WP-CLI)
 remains unimplemented; nothing in the current pipeline needs it yet.
+
+## Content editor (CMS-01)
+
+`routes/content.ts` exposes the live site's pages to the web UI's Content
+tab: `GET /projects/:id/pages` (list, via `tools/wordpress.ts`'s `listPages`)
+and `GET .../pages/:pageId` (single page, `getPage`) read straight from
+WP-CLI -- there's no separate content store to drift out of sync. A manual
+edit (`PUT .../pages/:pageId`) auto-checkpoints (VER-02) then calls the
+existing `update_page` tool through the same dispatcher as every other
+mutation (SEC-03/05/06), tagged `source: "manual"` in the audit log.
+`POST .../pages/:pageId/ai-draft` (`engine/copywriter.ts`'s
+`rewritePageContent`) is AI-only -- there's no sane offline heuristic for an
+arbitrary free-text instruction -- and only returns a suggested
+title/content for the UI to show; nothing is written to WordPress until the
+user reviews it and saves through the same PUT above.
 
 ## Every tool call goes through one dispatcher (SEC-03/05/06)
 

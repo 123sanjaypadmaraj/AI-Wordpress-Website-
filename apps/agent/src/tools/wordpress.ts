@@ -1,5 +1,5 @@
 import { execWpCli, readProjectSecret } from "../docker/compose.js";
-import type { Project } from "@ai-wp/shared";
+import type { CmsPageDetail, CmsPageSummary, Project } from "@ai-wp/shared";
 
 /**
  * WordPress Agent Tool Layer (spec section 16).
@@ -139,6 +139,65 @@ export async function deletePage(project: Project, id: number) {
   await wp(project, ["post", "delete", String(id), "--force"]);
 }
 
+/**
+ * CMS-01: the page list + per-page content the in-app content editor reads.
+ * Deliberately reads live from WP-CLI rather than mirroring pages into
+ * `project.spec` or a separate store -- the editor can never show stale
+ * content, and a manual `wp-admin` edit is picked up on next load too.
+ */
+export async function listPages(project: Project): Promise<CmsPageSummary[]> {
+  const { stdout } = await wp(project, [
+    "post",
+    "list",
+    "--post_type=page",
+    "--post_status=publish,draft,future,private",
+    "--fields=ID,post_title,post_name,post_status",
+    "--format=json",
+    "--orderby=title",
+    "--order=ASC",
+  ]).catch(() => ({ stdout: "" }));
+  try {
+    const rows = JSON.parse(stdout || "[]") as Array<{
+      ID: string;
+      post_title: string;
+      post_name: string;
+      post_status: string;
+    }>;
+    return rows.map((r) => ({ id: Number(r.ID), title: r.post_title, slug: r.post_name, status: r.post_status }));
+  } catch {
+    return [];
+  }
+}
+
+export async function getPage(project: Project, id: number): Promise<CmsPageDetail | null> {
+  const { stdout } = await wp(project, [
+    "post",
+    "get",
+    String(id),
+    "--fields=ID,post_title,post_name,post_status,post_content",
+    "--format=json",
+  ]).catch(() => ({ stdout: "" }));
+  if (!stdout.trim()) return null;
+  try {
+    const row = JSON.parse(stdout) as {
+      ID: string;
+      post_title: string;
+      post_name: string;
+      post_status: string;
+      post_content: string;
+    };
+    return {
+      id: Number(row.ID),
+      title: row.post_title,
+      slug: row.post_name,
+      status: row.post_status,
+      content: row.post_content,
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function existingMenuSlugs(project: Project, menuName: string): Promise<Set<string>> {
   const { stdout } = await wp(project, [
     "menu",
@@ -190,6 +249,27 @@ export async function removeMenuItemForPage(project: Project, menuName: string, 
 export async function addCustomCss(project: Project, css: string) {
   const encoded = css.replace(/'/g, "'\\''");
   await wp(project, ["eval", `wp_update_custom_css_post('${encoded}');`]);
+}
+
+/**
+ * Contact Form 7's shortcode requires an explicit form id -- `[contact-form-7]`
+ * with no id renders "Error: Contact form not found" instead of a form, even
+ * though the plugin auto-creates a default "Contact form 1" post on
+ * activation. Looks that default form up so the generated shortcode can
+ * reference it by id.
+ */
+export async function getContactFormId(project: Project): Promise<number | null> {
+  const { stdout } = await wp(project, [
+    "post",
+    "list",
+    "--post_type=wpcf7_contact_form",
+    "--field=ID",
+    "--posts_per_page=1",
+    "--orderby=ID",
+    "--order=ASC",
+  ]).catch(() => ({ stdout: "" }));
+  const id = Number(stdout.trim().split("\n")[0]);
+  return Number.isFinite(id) && id > 0 ? id : null;
 }
 
 export async function getSiteStatus(project: Project) {

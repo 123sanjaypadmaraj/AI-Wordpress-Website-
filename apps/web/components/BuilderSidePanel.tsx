@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import type { AuditLogEntry, Project, ProjectBackup, ProjectCheckpoint } from "@ai-wp/shared";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { AuditLogEntry, CmsPageSummary, Project, ProjectBackup, ProjectCheckpoint } from "@ai-wp/shared";
 import { api } from "@/lib/api";
 import { StatusBadge } from "@/components/StatusBadge";
 
-type Tab = "requirements" | "themes" | "progress" | "preview" | "history" | "settings";
+type Tab = "requirements" | "themes" | "progress" | "preview" | "content" | "history" | "settings";
 
 const PIPELINE_STEPS: Array<{ label: string; states: string[] }> = [
   { label: "Requirements analyzed", states: ["SPECIFICATION_READY", "THEME_SELECTION", "ENVIRONMENT_CREATING", "WORDPRESS_READY", "THEME_INSTALLING", "PLUGINS_INSTALLING", "GENERATING", "CONFIGURING", "TESTING", "VISUAL_REVIEW", "READY"] },
@@ -19,10 +19,19 @@ const PIPELINE_STEPS: Array<{ label: string; states: string[] }> = [
   { label: "Ready", states: ["READY"] },
 ];
 
-const KNOWN_PAGES = ["home", "about", "contact", "pricing", "team", "gallery", "blog", "faq", "testimonials"];
+const KNOWN_PAGES = [
+  "home", "about", "contact", "pricing", "team", "gallery", "blog", "faq", "testimonials", "careers",
+  "shop", "product", "cart", "checkout", "projects", "menu", "reservations", "donate", "programs",
+  "events", "members", "services", "case-studies",
+];
 const KNOWN_FEATURES = ["event-registration", "project-showcase", "contact-form", "ecommerce", "blog", "team-page", "newsletter", "booking"];
 const STYLE_OPTIONS = ["minimal", "futuristic", "corporate", "playful", "premium", "bold"];
-const FONT_OPTIONS = ["Inter", "IBM Plex Sans", "Georgia"];
+const FONT_OPTIONS = ["Inter", "IBM Plex Sans", "Georgia", "Poppins", "Nunito", "Playfair Display"];
+const RADIUS_OPTIONS: Array<{ value: "sharp" | "soft" | "pill"; label: string }> = [
+  { value: "sharp", label: "Sharp" },
+  { value: "soft", label: "Soft" },
+  { value: "pill", label: "Pill" },
+];
 
 export function BuilderSidePanel({
   project,
@@ -37,6 +46,41 @@ export function BuilderSidePanel({
   const [device, setDevice] = useState<"desktop" | "tablet" | "mobile">("desktop");
   const [selecting, setSelecting] = useState<string | null>(null);
   const [variantChoice, setVariantChoice] = useState<Record<string, string>>({});
+  const [reloadNonce, setReloadNonce] = useState(0);
+  // Which generated page the preview iframe is showing -- "" means the
+  // homepage (the static front page at the site root). Lets the Preview tab
+  // actually browse the pages built from the requirements, not just the
+  // homepage every generated site was previously stuck on.
+  const [previewSlug, setPreviewSlug] = useState("");
+  const wasReady = useRef(project.status === "READY");
+  const wasThemeSelection = useRef(project.status === "THEME_SELECTION");
+
+  // Jump straight to the live preview the moment a build finishes, instead
+  // of leaving the visitor stranded on the Progress tab looking at a
+  // finished checklist -- this is the "show me something interactive, not
+  // just a log" complaint the Preview tab (below) is meant to fix.
+  useEffect(() => {
+    if (project.status === "READY" && !wasReady.current) {
+      wasReady.current = true;
+      setTab("preview");
+    } else if (project.status !== "READY") {
+      wasReady.current = false;
+    }
+  }, [project.status, wasReady]);
+
+  // Same idea one step earlier: the requirements conversation finishing
+  // flips status to THEME_SELECTION while this panel is already mounted (the
+  // initial useState above only picks the tab once, at mount), so without
+  // this the user is left looking at the now-stale Requirements tab with no
+  // sign that theme recommendations are ready on the Themes tab.
+  useEffect(() => {
+    if (project.status === "THEME_SELECTION" && !wasThemeSelection.current) {
+      wasThemeSelection.current = true;
+      setTab("themes");
+    } else if (project.status !== "THEME_SELECTION") {
+      wasThemeSelection.current = false;
+    }
+  }, [project.status, wasThemeSelection]);
 
   async function selectTheme(slug: string) {
     setSelecting(slug);
@@ -49,11 +93,39 @@ export function BuilderSidePanel({
     }
   }
 
+  // "What got built" summary -- surfaced once so a build's outcome is
+  // legible at a glance instead of only living as scattered log lines.
+  // Derived entirely from data the project already carries: no new backend
+  // field is needed for the theme name (matched against the recommendations
+  // this project was shown) or the plugin list (parsed off the pipeline's
+  // own "Installed and configured plugin: X" log lines).
+  const buildSummary = useMemo(() => {
+    const slug = project.spec.theme.selected;
+    const themeName =
+      project.themeRecommendations.find((r) => r.theme.slug === slug)?.theme.name ?? slug ?? "—";
+    const plugins = Array.from(
+      new Set(
+        project.log
+          .map((l) => l.message.match(/^Installed and configured plugin: (.+)$/)?.[1])
+          .filter((v): v is string => Boolean(v)),
+      ),
+    );
+    return { themeName, plugins };
+  }, [project.spec.theme.selected, project.themeRecommendations, project.log]);
+
+  // Pages use pretty permalinks (/%postname%/, see tools/wordpress.ts) --
+  // "home" is the exception, mapped to the static front page at the root.
+  const previewUrl =
+    previewSlug && project.docker.previewUrl
+      ? `${project.docker.previewUrl.replace(/\/$/, "")}/${previewSlug}/`
+      : (project.docker.previewUrl ?? undefined);
+
   const tabs: Array<{ id: Tab; label: string }> = [
     { id: "requirements", label: "Requirements" },
     { id: "themes", label: "Themes" },
     { id: "progress", label: "Progress" },
     { id: "preview", label: "Preview" },
+    { id: "content", label: "Content" },
     { id: "history", label: "History" },
     { id: "settings", label: "Settings" },
   ];
@@ -65,8 +137,8 @@ export function BuilderSidePanel({
   } as const;
 
   return (
-    <div className="flex h-full flex-col rounded-xl border border-border bg-surface">
-      <div className="flex gap-1 overflow-x-auto border-b border-border p-2 text-sm">
+    <div className="flex h-full min-h-0 flex-col rounded-xl border border-border bg-surface">
+      <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-border p-2 text-sm">
         {tabs.map((t) => (
           <button
             key={t.id}
@@ -78,7 +150,7 @@ export function BuilderSidePanel({
         ))}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {tab === "requirements" && <RequirementsTab project={project} onProjectUpdate={onProjectUpdate} />}
 
         {tab === "themes" && (
@@ -88,23 +160,28 @@ export function BuilderSidePanel({
             )}
             {project.themeRecommendations.map((r) => (
               <div key={r.theme.slug} className="rounded-lg border border-border p-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-medium">
-                    {r.theme.name}
-                    {r.source === "wordpress.org" && (
-                      <span className="ml-1.5 rounded-full bg-surface-alt px-1.5 py-0.5 text-[10px] font-normal text-ink-muted" title="Live WordPress.org search result (THM-04)">
-                        wp.org
-                      </span>
-                    )}
-                  </h3>
-                  <span className="font-mono text-xs text-accent">{r.score}%</span>
+                <div className="flex gap-3">
+                  <ThemeThumbnail url={r.theme.screenshotUrl} name={r.theme.name} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-medium">
+                        {r.theme.name}
+                        {r.source === "wordpress.org" && (
+                          <span className="ml-1.5 rounded-full bg-surface-alt px-1.5 py-0.5 text-[10px] font-normal text-ink-muted" title="Live WordPress.org search result (THM-04)">
+                            wp.org
+                          </span>
+                        )}
+                      </h3>
+                      <span className="font-mono text-xs text-accent">{r.score}%</span>
+                    </div>
+                    <p className="mt-1 text-xs text-ink-muted">{r.theme.description}</p>
+                    <ul className="mt-2 space-y-0.5 text-xs text-ink-muted">
+                      {r.reasons.map((reason) => (
+                        <li key={reason}>· {reason}</li>
+                      ))}
+                    </ul>
+                  </div>
                 </div>
-                <p className="mt-1 text-xs text-ink-muted">{r.theme.description}</p>
-                <ul className="mt-2 space-y-0.5 text-xs text-ink-muted">
-                  {r.reasons.map((reason) => (
-                    <li key={reason}>· {reason}</li>
-                  ))}
-                </ul>
 
                 {r.variants && r.variants.length > 0 && (
                   <div className="mt-3">
@@ -118,7 +195,11 @@ export function BuilderSidePanel({
                             variantChoice[r.theme.slug] === v.id ? "border-accent bg-accent-soft text-accent" : "border-border text-ink-muted"
                           }`}
                         >
-                          <span className="h-3 w-3 rounded-full border border-border" style={{ backgroundColor: v.primary_color }} />
+                          <span
+                            className="h-3 w-3 rounded-full border border-border"
+                            style={{ background: `linear-gradient(90deg, ${v.primary_color} 50%, ${v.secondary_color} 50%)` }}
+                            title={`${v.primary_color} / ${v.secondary_color}`}
+                          />
                           {v.label}
                         </button>
                       ))}
@@ -157,7 +238,7 @@ export function BuilderSidePanel({
                     PIPELINE_STEPS[PIPELINE_STEPS.indexOf(step) - 1]?.states.includes(project.status);
                   return (
                     <li key={step.label} className="flex items-center gap-2">
-                      <span className={done ? "text-emerald-600" : active ? "text-amber-600" : "text-ink-muted"}>
+                      <span className={done ? "text-emerald-400" : active ? "text-amber-400" : "text-ink-muted"}>
                         {done ? "✓" : active ? "●" : "○"}
                       </span>
                       <span className={done ? "" : "text-ink-muted"}>{step.label}</span>
@@ -173,7 +254,7 @@ export function BuilderSidePanel({
                 {project.log.map((entry) => (
                   <p
                     key={entry.id}
-                    className={entry.level === "error" ? "text-rose-600" : entry.level === "warn" ? "text-amber-600" : "text-ink-muted"}
+                    className={entry.level === "error" ? "text-rose-400" : entry.level === "warn" ? "text-amber-400" : "text-ink-muted"}
                   >
                     {new Date(entry.timestamp).toLocaleTimeString()} {entry.message}
                   </p>
@@ -189,6 +270,52 @@ export function BuilderSidePanel({
               <p className="text-sm text-ink-muted">No live preview yet -- select a theme to start the build.</p>
             ) : (
               <>
+                {project.status === "READY" && (
+                  <div className="rounded-lg border border-border bg-surface-alt p-3 text-xs">
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="font-medium text-ink">What we built</span>
+                      <div className="flex gap-1">
+                        <span
+                          className="h-3 w-3 rounded-full border border-border"
+                          style={{ backgroundColor: project.spec.design.primary_color }}
+                          title={`Primary color ${project.spec.design.primary_color}`}
+                        />
+                        <span
+                          className="h-3 w-3 rounded-full border border-border"
+                          style={{ backgroundColor: project.spec.design.secondary_color }}
+                          title={`Secondary color ${project.spec.design.secondary_color}`}
+                        />
+                      </div>
+                    </div>
+                    <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+                      <dt className="text-ink-muted">Theme</dt>
+                      <dd>{buildSummary.themeName}</dd>
+                      <dt className="text-ink-muted">Style</dt>
+                      <dd className="capitalize">{project.spec.design.style || "—"}</dd>
+                      <dt className="text-ink-muted">Pages</dt>
+                      <dd>{project.spec.pages.length}</dd>
+                      <dt className="text-ink-muted">Features</dt>
+                      <dd>{project.spec.features.length ? project.spec.features.join(", ") : "None"}</dd>
+                      <dt className="text-ink-muted">Plugins</dt>
+                      <dd>{buildSummary.plugins.length ? buildSummary.plugins.join(", ") : "None"}</dd>
+                    </dl>
+                    <div className="mt-2.5 flex flex-wrap gap-1.5">
+                      {project.spec.pages.map((slug) => (
+                        <button
+                          key={slug}
+                          onClick={() => setPreviewSlug(slug === "home" ? "" : slug)}
+                          className={`rounded-full border px-2 py-0.5 text-[11px] ${
+                            (previewSlug || "home") === slug
+                              ? "border-accent bg-accent-soft text-accent"
+                              : "border-border text-ink-muted hover:text-accent"
+                          }`}
+                        >
+                          {slug}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div className="flex gap-1.5 text-xs">
                   {(["desktop", "tablet", "mobile"] as const).map((d) => (
                     <button
@@ -199,18 +326,26 @@ export function BuilderSidePanel({
                       {d[0].toUpperCase() + d.slice(1)}
                     </button>
                   ))}
+                  <button
+                    onClick={() => setReloadNonce((n) => n + 1)}
+                    className="rounded-md border border-border px-2.5 py-1 text-ink-muted hover:text-accent"
+                    title="Reload preview"
+                  >
+                    ↻ Reload
+                  </button>
                   <a
-                    href={project.docker.previewUrl}
+                    href={previewUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="ml-auto rounded-md border border-border px-2.5 py-1 text-ink-muted hover:text-accent"
+                    className="rounded-md border border-border px-2.5 py-1 text-ink-muted hover:text-accent"
                   >
                     Open in new tab ↗
                   </a>
                 </div>
-                <div className="flex-1 overflow-auto rounded-lg border border-border bg-surface-alt p-2">
+                <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border bg-surface-alt p-2">
                   <iframe
-                    src={project.docker.previewUrl}
+                    key={`${project.updatedAt}-${reloadNonce}-${previewSlug}`}
+                    src={previewUrl}
                     style={{ width: deviceWidths[device], height: "560px", maxWidth: "100%" }}
                     className="mx-auto rounded-md border border-border bg-white"
                     title="Live preview"
@@ -221,11 +356,37 @@ export function BuilderSidePanel({
           </div>
         )}
 
+        {tab === "content" && <ContentTab project={project} />}
+
         {tab === "history" && <HistoryTab project={project} onProjectUpdate={onProjectUpdate} />}
 
         {tab === "settings" && <SettingsTab project={project} onProjectUpdate={onProjectUpdate} />}
       </div>
     </div>
+  );
+}
+
+// Small preview image shown right next to each theme option so it can be
+// judged at a glance while selecting. Falls back to an initial-letter tile
+// when a theme has no screenshot or the image fails to load.
+function ThemeThumbnail({ url, name }: { url?: string; name: string }) {
+  const [failed, setFailed] = useState(false);
+
+  if (!url || failed) {
+    return (
+      <div className="flex h-16 w-20 flex-shrink-0 items-center justify-center rounded-md border border-border bg-surface-alt text-sm font-medium text-ink-muted">
+        {name.charAt(0).toUpperCase()}
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={url}
+      alt={`${name} preview`}
+      className="h-16 w-20 flex-shrink-0 rounded-md border border-border object-cover"
+      onError={() => setFailed(true)}
+    />
   );
 }
 
@@ -240,7 +401,10 @@ function RequirementsTab({ project, onProjectUpdate }: { project: Project; onPro
   const [features, setFeatures] = useState<string[]>(project.spec.features);
   const [style, setStyle] = useState(project.spec.design.style);
   const [color, setColor] = useState(project.spec.design.primary_color);
-  const [font, setFont] = useState(project.spec.design.font);
+  const [secondaryColor, setSecondaryColor] = useState(project.spec.design.secondary_color);
+  const [headingFont, setHeadingFont] = useState(project.spec.design.heading_font);
+  const [bodyFont, setBodyFont] = useState(project.spec.design.body_font);
+  const [radius, setRadius] = useState(project.spec.design.radius);
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<string | null>(null);
 
@@ -251,7 +415,10 @@ function RequirementsTab({ project, onProjectUpdate }: { project: Project; onPro
     JSON.stringify(features) !== JSON.stringify(project.spec.features) ||
     style !== project.spec.design.style ||
     color !== project.spec.design.primary_color ||
-    font !== project.spec.design.font;
+    secondaryColor !== project.spec.design.secondary_color ||
+    headingFont !== project.spec.design.heading_font ||
+    bodyFont !== project.spec.design.body_font ||
+    radius !== project.spec.design.radius;
 
   function toggle(list: string[], setList: (v: string[]) => void, value: string) {
     setList(list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
@@ -265,7 +432,15 @@ function RequirementsTab({ project, onProjectUpdate }: { project: Project; onPro
         site: { ...project.spec.site, type, audience: audience.split(",").map((a) => a.trim()).filter(Boolean) },
         pages,
         features,
-        design: { ...project.spec.design, style, primary_color: color, font },
+        design: {
+          ...project.spec.design,
+          style,
+          primary_color: color,
+          secondary_color: secondaryColor,
+          heading_font: headingFont,
+          body_font: bodyFont,
+          radius,
+        },
       };
       const res = await api.updateSpec(project.id, patch);
       if ("project" in res) {
@@ -309,13 +484,41 @@ function RequirementsTab({ project, onProjectUpdate }: { project: Project; onPro
           ))}
         </select>
       </LabeledField>
-      <div className="flex items-end gap-4">
+      <div className="flex flex-wrap items-end gap-4">
         <LabeledField label="Primary color">
           <input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="h-8 w-14 rounded border border-border bg-canvas" />
         </LabeledField>
-        <LabeledField label="Font">
-          <select value={font} onChange={(e) => setFont(e.target.value)} className="rounded-md border border-border bg-canvas px-2 py-1 text-sm">
-            {Array.from(new Set([font, ...FONT_OPTIONS])).map((f) => (
+        <LabeledField label="Secondary color">
+          <input
+            type="color"
+            value={secondaryColor}
+            onChange={(e) => setSecondaryColor(e.target.value)}
+            className="h-8 w-14 rounded border border-border bg-canvas"
+          />
+        </LabeledField>
+        <LabeledField label="Corner style">
+          <select
+            value={radius}
+            onChange={(e) => setRadius(e.target.value as typeof radius)}
+            className="rounded-md border border-border bg-canvas px-2 py-1 text-sm"
+          >
+            {RADIUS_OPTIONS.map((r) => (
+              <option key={r.value} value={r.value}>{r.label}</option>
+            ))}
+          </select>
+        </LabeledField>
+      </div>
+      <div className="flex flex-wrap items-end gap-4">
+        <LabeledField label="Heading font">
+          <select value={headingFont} onChange={(e) => setHeadingFont(e.target.value)} className="rounded-md border border-border bg-canvas px-2 py-1 text-sm">
+            {Array.from(new Set([headingFont, ...FONT_OPTIONS])).map((f) => (
+              <option key={f} value={f}>{f}</option>
+            ))}
+          </select>
+        </LabeledField>
+        <LabeledField label="Body font">
+          <select value={bodyFont} onChange={(e) => setBodyFont(e.target.value)} className="rounded-md border border-border bg-canvas px-2 py-1 text-sm">
+            {Array.from(new Set([bodyFont, ...FONT_OPTIONS])).map((f) => (
               <option key={f} value={f}>{f}</option>
             ))}
           </select>
@@ -355,6 +558,205 @@ function LabeledField({ label, children }: { label: string; children: React.Reac
     <div>
       <div className="mb-1 text-xs uppercase tracking-wide text-ink-muted">{label}</div>
       {children}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// CMS-01: manual + AI-assisted page content editing, read/written live
+// against the project's real WordPress (apps/agent/src/routes/content.ts) --
+// not a separate content store, so this can never drift from the live site.
+// A manual save and an AI-drafted save both go through the same PUT, which
+// auto-checkpoints first (VER-02), so either kind of edit is one "Restore"
+// away from undone from the History tab.
+// ---------------------------------------------------------------------------
+
+function ContentTab({ project }: { project: Project }) {
+  const [pages, setPages] = useState<CmsPageSummary[] | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [loadingPage, setLoadingPage] = useState(false);
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState("");
+  const [loaded, setLoaded] = useState<{ title: string; content: string } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveResult, setSaveResult] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const [instruction, setInstruction] = useState("");
+  const [drafting, setDrafting] = useState(false);
+  const [draftError, setDraftError] = useState<string | null>(null);
+
+  const running = project.docker.status === "running";
+
+  useEffect(() => {
+    if (!running) return;
+    let cancelled = false;
+    api
+      .listPages(project.id)
+      .then((p) => {
+        if (!cancelled) {
+          setPages(p);
+          setListError(null);
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) setListError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [project.id, running]);
+
+  async function selectPage(id: number) {
+    setSelectedId(id);
+    setLoadingPage(true);
+    setSaveResult(null);
+    setSaveError(null);
+    setDraftError(null);
+    try {
+      const page = await api.getPage(project.id, id);
+      setTitle(page.title);
+      setContent(page.content);
+      setLoaded({ title: page.title, content: page.content });
+    } finally {
+      setLoadingPage(false);
+    }
+  }
+
+  const dirty = loaded !== null && (title !== loaded.title || content !== loaded.content);
+
+  async function save() {
+    if (selectedId === null) return;
+    setSaving(true);
+    setSaveResult(null);
+    setSaveError(null);
+    try {
+      const updated = await api.savePage(project.id, selectedId, { title, content });
+      setTitle(updated.title);
+      setContent(updated.content);
+      setLoaded({ title: updated.title, content: updated.content });
+      setPages((ps) => ps?.map((p) => (p.id === updated.id ? { ...p, title: updated.title } : p)) ?? ps);
+      setSaveResult("Saved to the live site.");
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function askAi() {
+    if (selectedId === null || !instruction.trim() || drafting) return;
+    setDrafting(true);
+    setDraftError(null);
+    try {
+      const draft = await api.aiDraftPage(project.id, selectedId, instruction.trim());
+      setTitle(draft.title);
+      setContent(draft.content);
+      setInstruction("");
+    } catch (e) {
+      setDraftError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDrafting(false);
+    }
+  }
+
+  if (!running) {
+    return <p className="text-sm text-ink-muted">Start the environment (Settings tab) to edit page content.</p>;
+  }
+
+  const editUrl =
+    project.docker.adminUrl && selectedId !== null ? `${project.docker.adminUrl}/post.php?post=${selectedId}&action=edit` : null;
+
+  return (
+    <div className="flex h-full min-h-0 gap-3 text-sm">
+      <div className="w-36 shrink-0 space-y-1 overflow-y-auto border-r border-border pr-2">
+        <div className="mb-1 text-xs uppercase tracking-wide text-ink-muted">Pages</div>
+        {listError && <p className="text-xs text-rose-400">{listError}</p>}
+        {pages === null && !listError && <p className="text-xs text-ink-muted">Loading…</p>}
+        {pages?.length === 0 && <p className="text-xs text-ink-muted">No pages yet.</p>}
+        {pages?.map((p) => (
+          <button
+            key={p.id}
+            onClick={() => selectPage(p.id)}
+            title={p.title}
+            className={`block w-full truncate rounded-md px-2 py-1 text-left text-xs ${
+              selectedId === p.id ? "bg-accent-soft text-accent" : "text-ink-muted hover:bg-surface-alt"
+            }`}
+          >
+            {p.title}
+            {p.status !== "publish" && <span className="ml-1 text-[10px] opacity-70">({p.status})</span>}
+          </button>
+        ))}
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto pl-1">
+        {selectedId === null && <p className="text-sm text-ink-muted">Pick a page on the left to edit its title and content.</p>}
+        {selectedId !== null && loadingPage && <p className="text-sm text-ink-muted">Loading page…</p>}
+        {selectedId !== null && !loadingPage && (
+          <div className="space-y-3">
+            <LabeledField label="Title">
+              <input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                className="w-full rounded-md border border-border bg-canvas px-2 py-1 text-sm"
+              />
+            </LabeledField>
+
+            <LabeledField label="Content (Gutenberg block HTML)">
+              <textarea
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                rows={14}
+                spellCheck={false}
+                className="w-full rounded-md border border-border bg-canvas px-2 py-1.5 font-mono text-xs leading-relaxed"
+              />
+            </LabeledField>
+
+            <div className="flex items-center gap-3">
+              <button
+                onClick={save}
+                disabled={!dirty || saving}
+                className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+              >
+                {saving ? "Saving…" : "Save changes"}
+              </button>
+              {editUrl && (
+                <a href={editUrl} target="_blank" rel="noreferrer" className="text-xs text-ink-muted hover:text-accent">
+                  Open in WordPress editor ↗
+                </a>
+              )}
+            </div>
+            {saveResult && <p className="text-xs text-emerald-400">{saveResult}</p>}
+            {saveError && <p className="text-xs text-rose-400">{saveError}</p>}
+
+            <div className="border-t border-border pt-3">
+              <div className="mb-1 text-xs uppercase tracking-wide text-ink-muted">Ask AI to edit this page</div>
+              <div className="flex gap-2">
+                <input
+                  value={instruction}
+                  onChange={(e) => setInstruction(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && askAi()}
+                  placeholder='e.g. "make the intro shorter" or "add a paragraph about our warranty"'
+                  className="flex-1 rounded-md border border-border bg-canvas px-2 py-1 text-sm"
+                />
+                <button
+                  onClick={askAi}
+                  disabled={drafting || !instruction.trim()}
+                  className="rounded-md border border-border px-3 py-1.5 text-xs hover:border-accent hover:text-accent disabled:opacity-40"
+                >
+                  {drafting ? "Thinking…" : "Generate"}
+                </button>
+              </div>
+              {draftError && <p className="mt-1.5 text-xs text-rose-400">{draftError}</p>}
+              <p className="mt-1.5 text-xs text-ink-muted">
+                Fills in a suggested rewrite above for you to review -- nothing is written to the live site until you
+                click Save changes.
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -476,7 +878,7 @@ function HistoryTab({ project, onProjectUpdate }: { project: Project; onProjectU
           <div className="mt-2 max-h-56 space-y-1 overflow-y-auto rounded-lg bg-surface-alt p-2 font-mono text-[11px]">
             {auditLog.length === 0 && <p className="text-ink-muted">No tool calls recorded yet.</p>}
             {[...auditLog].reverse().map((a) => (
-              <p key={a.id} className={a.ok ? "text-ink-muted" : "text-rose-600"}>
+              <p key={a.id} className={a.ok ? "text-ink-muted" : "text-rose-400"}>
                 {new Date(a.timestamp).toLocaleTimeString()} [{a.source}] {a.tool} ({a.permission}) {a.ok ? "ok" : `failed: ${a.error}`} · {a.durationMs}ms
               </p>
             ))}
@@ -530,7 +932,7 @@ function SettingsTab({ project, onProjectUpdate }: { project: Project; onProject
                 run("stop", () => api.stopEnvironment(project.id));
               }}
               disabled={busy !== null}
-              className="rounded-md border border-border px-3 py-1.5 text-xs text-ink-muted hover:border-rose-300 hover:text-rose-600 disabled:opacity-40"
+              className="rounded-md border border-border px-3 py-1.5 text-xs text-ink-muted hover:border-rose-500/50 hover:text-rose-400 disabled:opacity-40"
             >
               {busy === "stop" ? "Stopping…" : "Stop environment"}
             </button>

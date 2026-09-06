@@ -1,6 +1,7 @@
-import Anthropic from "@anthropic-ai/sdk";
 import type { SiteSpecification } from "@ai-wp/shared";
+import { aiAvailable, completeText } from "../llm/client.js";
 import { COLOR_MAP, COLOR_WORDS, FEATURE_KEYWORDS, STYLE_KEYWORDS, detectFromKeywords } from "./requirements.js";
+import { discoverSkillPlugin, extractSkillMention, skillDiscoveryEnabled } from "./skills.js";
 
 /**
  * GEN-09/PRV-04: turns a post-READY chat message into one small, structured
@@ -15,6 +16,7 @@ export type EditIntent =
   | { kind: "change_color"; color: string }
   | { kind: "change_style"; style: string }
   | { kind: "add_feature"; feature: string }
+  | { kind: "add_skill"; query: string; slug: string; name: string }
   | { kind: "restart_environment" }
   | { kind: "undo" }
   | { kind: "unknown"; raw: string };
@@ -76,21 +78,18 @@ interface AiIntent {
 }
 
 async function aiIntent(text: string, spec: SiteSpecification): Promise<EditIntent | null> {
+  const reply = await completeText({
+    maxTokens: 250,
+    system:
+      "The site has already been built. Classify this chat message as ONE structured edit intent, JSON only: " +
+      '{"kind": "add_page"|"remove_page"|"change_color"|"change_style"|"add_feature"|"restart_environment"|"undo"|"unknown", ' +
+      '"slug"?: string, "title"?: string, "color"?: string (hex), "style"?: string, "feature"?: string}. ' +
+      `Current pages: ${spec.pages.join(", ")}. Current features: ${spec.features.join(", ")}. No prose.`,
+    prompt: text,
+  });
+  if (!reply) return null;
   try {
-    const client = new Anthropic();
-    const response = await client.messages.create({
-      model: "claude-sonnet-4-5",
-      max_tokens: 250,
-      system:
-        "The site has already been built. Classify this chat message as ONE structured edit intent, JSON only: " +
-        '{"kind": "add_page"|"remove_page"|"change_color"|"change_style"|"add_feature"|"restart_environment"|"undo"|"unknown", ' +
-        '"slug"?: string, "title"?: string, "color"?: string (hex), "style"?: string, "feature"?: string}. ' +
-        `Current pages: ${spec.pages.join(", ")}. Current features: ${spec.features.join(", ")}. No prose.`,
-      messages: [{ role: "user", content: text }],
-    });
-    const block = response.content.find((c) => c.type === "text");
-    if (!block || block.type !== "text") return null;
-    const match = block.text.match(/\{[\s\S]*\}/);
+    const match = reply.match(/\{[\s\S]*\}/);
     if (!match) return null;
     const parsed = JSON.parse(match[0]) as AiIntent;
     switch (parsed.kind) {
@@ -118,10 +117,33 @@ async function aiIntent(text: string, spec: SiteSpecification): Promise<EditInte
   }
 }
 
+/**
+ * Live skill-pack discovery for post-READY chat edits (engine/skills.ts):
+ * only reachable via this explicit heuristic + WordPress.org-verified path,
+ * never via aiIntent's JSON parsing below -- the model has no way to confirm
+ * a plugin slug actually exists, so letting it emit "add_skill" directly
+ * would mean installing a hallucinated slug. classifyEditIntent tries this
+ * before falling back to the AI classifier, and the AI classifier's own
+ * switch statement has no "add_skill" case, so it can never produce one.
+ */
+async function skillIntent(text: string, spec: SiteSpecification): Promise<EditIntent | null> {
+  if (!skillDiscoveryEnabled()) return null;
+  const mention = extractSkillMention(text);
+  if (!mention) return null;
+  const known = new Set(spec.discoveredSkills.map((s) => s.slug));
+  const skill = await discoverSkillPlugin(mention);
+  if (!skill || known.has(skill.slug)) return null;
+  return { kind: "add_skill", query: mention, slug: skill.slug, name: skill.name };
+}
+
 export async function classifyEditIntent(text: string, spec: SiteSpecification): Promise<EditIntent> {
   const heuristic = heuristicIntent(text, spec);
   if (heuristic.kind !== "unknown") return heuristic;
-  if (process.env.ANTHROPIC_API_KEY) {
+
+  const skill = await skillIntent(text, spec);
+  if (skill) return skill;
+
+  if (aiAvailable()) {
     const ai = await aiIntent(text, spec);
     if (ai) return ai;
   }

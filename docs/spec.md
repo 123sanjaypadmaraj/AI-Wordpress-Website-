@@ -347,7 +347,11 @@ Example:
     "style": "futuristic",
     "mode": "dark",
     "primary_color": "#...",
-    "font": "Inter"
+    "secondary_color": "#...",
+    "heading_font": "Poppins",
+    "body_font": "Inter",
+    "radius": "pill",
+    "preset": "bold"
   },
   "theme": {
     "selected": "...",

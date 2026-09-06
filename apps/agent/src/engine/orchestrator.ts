@@ -1,12 +1,15 @@
 import type { Project, ProjectState } from "@ai-wp/shared";
 import { store } from "../db/store.js";
 import { createWordPressEnvironment } from "../docker/compose.js";
-import { installWordPressCore, setHomepage } from "../tools/wordpress.js";
+import { installWordPressCore, setHomepage, getContactFormId } from "../tools/wordpress.js";
 import { callTool } from "../tools/dispatcher.js";
-import { THEME_CATALOG } from "./themes.js";
+import { resolveThemeName } from "./themes.js";
 import { generateCopy } from "./copywriter.js";
+import { generateSupportingContent } from "./contentGenerator.js";
 import { buildPageContent } from "./templates.js";
+import { planPageLayout, bonusContentKeys } from "./layout.js";
 import { pluginsForSpec } from "../tools/plugins.js";
+import { discoverSkillPlugin } from "./skills.js";
 import { generateAndActivateChildTheme } from "../tools/childtheme.js";
 import { runSmokeSuite } from "./testRunner.js";
 import { runVisualCritic } from "./critic.js";
@@ -71,7 +74,7 @@ export async function runGenerationPipeline(projectId: string): Promise<void> {
 
     setStatus(project, "THEME_INSTALLING");
     const themeSlug = project.spec.theme.selected ?? "twentytwentyfour";
-    const themeName = THEME_CATALOG.find((t) => t.slug === themeSlug)?.name ?? themeSlug;
+    const themeName = resolveThemeName(project, themeSlug);
     log(project, `Installing WordPress core (title: "${project.spec.site.name}")`);
     await withRetry(() => installWordPressCore(project!));
     log(project, "Installing and activating theme: " + themeSlug);
@@ -96,13 +99,36 @@ export async function runGenerationPipeline(projectId: string): Promise<void> {
       }
     }
 
+    // Live skill packs gathered during requirement-gathering (engine/skills.ts).
+    // Re-verified against the WordPress.org directory here rather than trusted
+    // off spec.discoveredSkills alone -- the in-memory live-allowlist a skill
+    // joined at discovery time doesn't survive an agent restart, and
+    // re-checking also catches a plugin that's since dropped below the
+    // quality bar (pulled, abandoned, review-bombed).
+    for (const skill of project.spec.discoveredSkills) {
+      const verified = await discoverSkillPlugin(skill.query);
+      if (verified?.slug !== skill.slug) {
+        log(project, `Skipping skill "${skill.name}" -- no longer verifiable against the WordPress.org directory`, "warn");
+        continue;
+      }
+      try {
+        await callTool(project, "install_plugin", { slug: skill.slug }, { source: "pipeline" });
+        log(project, `Installed skill: ${skill.name} (for "${skill.query}")`);
+      } catch (err) {
+        log(project, `Skill "${skill.name}" failed to install: ${err instanceof Error ? err.message : err}`, "warn");
+      }
+    }
+
     setStatus(project, "GENERATING");
     let homepageId: number | null = null;
-    const hasContactFormPlugin = plugins.includes("contact-form-7");
+    const contactFormId = plugins.includes("contact-form-7") ? await getContactFormId(project) : null;
+    const hasWooCommerce = plugins.includes("woocommerce");
     for (const pageSlug of project.spec.pages) {
       const title = pageSlug.charAt(0).toUpperCase() + pageSlug.slice(1).replace(/-/g, " ");
       const copy = await generateCopy(pageSlug, project.spec); // GEN-05
-      const content = buildPageContent(pageSlug, project.spec, copy, { hasContactFormPlugin }); // GEN-03/04
+      const layout = await planPageLayout(pageSlug, project.spec); // GEN-11
+      const supportingContent = await generateSupportingContent(pageSlug, project.spec, bonusContentKeys(layout.bonus)); // GEN-05b
+      const content = buildPageContent(pageSlug, project.spec, copy, { contactFormId, hasWooCommerce, content: supportingContent, layout }); // GEN-03/04
       const { id } = (await callTool(
         project,
         "create_page",
@@ -139,7 +165,8 @@ export async function runGenerationPipeline(projectId: string): Promise<void> {
       if (critique.looksBlank && homepageId) {
         log(project, "Visual critic flagged a likely-blank homepage -- regenerating homepage copy once and re-checking", "warn");
         const copy = await generateCopy("home", project.spec);
-        const content = buildPageContent("home", project.spec, copy, { hasContactFormPlugin });
+        const layout = await planPageLayout("home", project.spec);
+        const content = buildPageContent("home", project.spec, copy, { contactFormId, layout });
         await callTool(project, "update_page", { slug: "home", content }, { source: "pipeline" });
         critique = await runVisualCritic(project);
       }

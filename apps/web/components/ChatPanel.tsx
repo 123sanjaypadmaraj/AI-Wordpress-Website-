@@ -84,8 +84,8 @@ export function ChatPanel({
   const showUndo = POST_BUILD_STATES.has(project.status) && project.checkpoints?.some((c) => c.kind === "auto");
 
   return (
-    <div className="flex h-full flex-col rounded-xl border border-border bg-surface">
-      <div className="flex-1 space-y-3 overflow-y-auto p-4">
+    <div className="flex h-full min-h-0 flex-col rounded-xl border border-border bg-surface">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
         {messages.length === 0 && (
           <p className="text-sm text-ink-muted">
             Tell the AI what you&apos;re building -- e.g. &quot;A website for a college robotics club, with
@@ -106,7 +106,7 @@ export function ChatPanel({
                     <button
                       key={c.value}
                       onClick={() => send(c.label)}
-                      className="rounded-full border border-accent/30 bg-white px-2.5 py-1 text-xs text-accent hover:bg-accent-soft"
+                      className="rounded-full border border-accent/30 bg-surface px-2.5 py-1 text-xs text-accent hover:bg-accent-soft"
                     >
                       {c.label}
                     </button>
