@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "jsx": "react-jsx",
+    "types": ["node"],
+    "paths": {
+      "@ai-wp/shared": ["../packages/shared/src/index.ts"],
+      "@agent/*": ["../apps/agent/src/*"],
+      "@/*": ["../apps/web/*"]
+    }
+  },
+  // Only tests/unit and tests/integration -- tests/e2e is its own Playwright
+  // project with its own tsconfig resolution via playwright.config.ts.
+  "include": ["unit/**/*.ts", "unit/**/*.tsx", "integration/**/*.ts", "integration/**/*.tsx"]
+}

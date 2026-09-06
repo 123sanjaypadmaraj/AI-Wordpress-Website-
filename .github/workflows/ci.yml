@@ -13,31 +13,65 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
 
       - name: Install dependencies
         run: npm install
 
-      - name: Typecheck (packages/shared, apps/agent, apps/web)
+      - name: Typecheck (packages/shared, apps/agent, apps/web, tests/)
         run: npm run typecheck
 
       - name: Build (packages/shared, apps/agent, apps/web)
         run: npm run build
 
-  e2e-smoke:
-    # TST-01/02's standalone suite needs a real generated WordPress site to
-    # point at, which needs Docker + the full build pipeline -- out of scope
-    # for a plain CI runner today. This job only verifies the suite itself
-    # is well-formed (Playwright can load the config and list tests), so a
-    # broken spec file still fails CI even without a live site to test.
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Lint (packages/shared, apps/agent, apps/web)
+        run: npm run lint
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Unit + integration tests (Vitest: packages/shared, apps/agent, apps/web)
+        run: npm run test:unit
+
+  e2e-smoke:
+    # TST-01/02's standalone suite needs a real generated WordPress site to
+    # point at, which needs Docker + the full build pipeline -- out of scope
+    # for a plain CI runner today (see docs/TESTING.md's "Why e2e isn't a
+    # real CI run yet" section for the full reasoning). This job only
+    # verifies the suite itself is well-formed (Playwright can load the
+    # config and list tests), so a broken spec file still fails CI even
+    # without a live site to test.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
           cache: "npm"
 
       - name: Install dependencies

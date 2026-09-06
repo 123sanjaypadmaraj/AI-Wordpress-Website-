@@ -7,7 +7,11 @@
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
     "typecheck": "tsc --noEmit",
-    "build": "tsc -p tsconfig.json --noEmit false --outDir dist"
+    "build": "tsc -p tsconfig.json --noEmit false --outDir dist",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:unit": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@ai-wp/shared": "*",
@@ -22,12 +26,17 @@
     "playwright": "^1.48.2"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "@types/archiver": "^6.0.3",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/node": "^22.9.0",
     "@types/pg": "^8.11.10",
+    "eslint": "^9.39.5",
+    "globals": "^17.12.0",
     "tsx": "^4.19.2",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.69.0",
+    "vitest": "^5.0.0"
   }
 }

@@ -11,14 +11,21 @@
     "dev:web": "npm run dev -w apps/web",
     "dev:agent": "npm run dev -w apps/agent",
     "build": "npm run build -w packages/shared && npm run build -w apps/agent && npm run build -w apps/web",
-    "typecheck": "npm run typecheck -w packages/shared && npm run typecheck -w apps/agent && npm run typecheck -w apps/web",
+    "typecheck": "npm run typecheck -w packages/shared && npm run typecheck -w apps/agent && npm run typecheck -w apps/web && npm run typecheck:tests",
+    "typecheck:tests": "tsc -p tests/tsconfig.json --noEmit",
+    "lint": "npm run lint -w packages/shared && npm run lint -w apps/agent && npm run lint -w apps/web",
+    "test": "npm run test -w packages/shared && npm run test -w apps/agent && npm run test -w apps/web",
+    "test:unit": "npm run test:unit -w packages/shared && npm run test:unit -w apps/agent && npm run test:unit -w apps/web",
+    "test:watch": "concurrently -n shared,agent,web -c blue,magenta,green \"npm run test:watch -w packages/shared\" \"npm run test:watch -w apps/agent\" \"npm run test:watch -w apps/web\"",
     "test:e2e": "playwright test -c tests/e2e/playwright.config.ts",
     "test:e2e:install": "playwright install --with-deps chromium"
   },
   "devDependencies": {
-    "@playwright/test": "^1.48.2"
+    "@playwright/test": "^1.48.2",
+    "concurrently": "^10.0.5",
+    "typescript": "^5.6.3"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12"
   }
 }
