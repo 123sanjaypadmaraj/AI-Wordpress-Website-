@@ -134,15 +134,27 @@ export async function callTool(
   opts: DispatchOptions,
 ): Promise<unknown> {
   const permission = TOOL_PERMISSIONS[tool];
-  if (permission === "destructive" && !opts.confirm) {
-    throw new Error(`Tool "${tool}" is destructive and requires explicit confirmation`);
-  }
 
   const started = Date.now();
   let ok = true;
   let error: string | null = null;
   let result: unknown;
   try {
+    // SECURITY FIX (2026-09-06): this confirmation gate used to run *before*
+    // the try/finally below, so a destructive call rejected for missing
+    // confirmation threw straight out of callTool and never reached the
+    // audit-log write -- the one class of call this module's own header
+    // comment promises to record "for every attempt, success or failure"
+    // was silently invisible to SEC-05's audit trail. Moved inside the try
+    // so a permission-tier rejection is now audited exactly like an
+    // allowlist rejection or an execution failure. Also hardened the check
+    // to `!== true` (was `!opts.confirm`): DispatchOptions.confirm is typed
+    // boolean, but callers that build `opts` from untyped/JSON input (a
+    // route body, a deserialized tool call) could otherwise pass a truthy
+    // non-boolean like the string "false" and have it treated as confirmed.
+    if (permission === "destructive" && opts.confirm !== true) {
+      throw new Error(`Tool "${tool}" is destructive and requires explicit confirmation`);
+    }
     result = await withRetry(() => execute(project, tool, args), { retries: opts.retries ?? 1 });
     return result;
   } catch (err) {

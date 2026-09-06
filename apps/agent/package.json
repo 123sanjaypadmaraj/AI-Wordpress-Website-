@@ -7,7 +7,9 @@
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
     "typecheck": "tsc --noEmit",
-    "build": "tsc -p tsconfig.json --noEmit false --outDir dist"
+    "build": "tsc -p tsconfig.json --noEmit false --outDir dist",
+    "test": "vitest run --config vitest.config.ts",
+    "test:watch": "vitest --config vitest.config.ts"
   },
   "dependencies": {
     "@ai-wp/shared": "*",
@@ -28,6 +30,7 @@
     "@types/node": "^22.9.0",
     "@types/pg": "^8.11.10",
     "tsx": "^4.19.2",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.9"
   }
 }
