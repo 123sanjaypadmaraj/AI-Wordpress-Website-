@@ -38,7 +38,7 @@ export const FEATURE_KEYWORDS: Record<string, string[]> = {
   blog: ["blog", "news", "articles", "posts"],
   "team-page": ["team", "staff", "our people", "founders"],
   newsletter: ["newsletter", "subscribe", "mailing list"],
-  booking: ["booking", "reservation", "appointment", "schedule a call"],
+  booking: ["booking", "bookings", "reservation", "reservations", "appointment", "appointments", "schedule a call"],
 };
 
 export const STYLE_KEYWORDS: Record<string, string[]> = {
@@ -236,7 +236,7 @@ function heuristicExtract(text: string, slots: RequirementSlots): RequirementSlo
     const extraPages = detectFromKeywords(text, EXTRA_PAGE_KEYWORDS);
     if (extraPages.length) {
       next.pages = extraPages;
-    } else if (["looks good", "none", "no thanks", "no"].includes(lower.trim())) {
+    } else if (["looks good", "none", "none of these", "no thanks", "no"].includes(lower.trim())) {
       next.pages = []; // explicit "no extra pages" answer, not just "nothing detected yet"
     }
   }
