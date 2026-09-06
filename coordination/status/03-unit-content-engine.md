@@ -1,8 +1,8 @@
 ---
-state: in-progress
+state: done
 owner: 03-unit-content-engine
 started: 2026-09-06T00:00:00Z
-summary: Unit tests for engine/templates.ts, copywriter.ts, contentGenerator.ts, skills.ts
+summary: 127 passing unit tests across templates.ts, copywriter.ts, contentGenerator.ts, skills.ts
 ---
 
 ## Decisions
@@ -30,4 +30,23 @@ summary: Unit tests for engine/templates.ts, copywriter.ts, contentGenerator.ts,
 
 ## Log
 
-- (see timestamps in commits)
+- Wrote and verified 127 passing tests across the 4 owned files:
+  - tests/unit/agent/engine/templates.test.ts (48 tests)
+  - tests/unit/agent/engine/copywriter.test.ts (35 tests)
+  - tests/unit/agent/engine/contentGenerator.test.ts (25 tests, includes a
+    "full page assembly" block combining layout.ts + copywriter.ts +
+    contentGenerator.ts + templates.ts's buildPageContent per the task's
+    "given a page type + spec + layout decision" bullet)
+  - tests/unit/agent/engine/skills.test.ts (19 tests, global fetch mocked,
+    covers found/no-match/non-ok/network-failure/malformed-body/slug-safety/
+    caching, plus SKILL_SOURCE=curated gating)
+  - Note: SKILL_SOURCE gating is tested (skillDiscoveryEnabled). THEME_SOURCE
+    doesn't affect any of my 4 owned modules (it only gates engine/themes.ts,
+    owned by task 02), so it isn't exercised here.
+- Verified with a scratch (uncommitted, --no-save) vitest install and a
+  scratch tsconfig extending apps/agent's own compiler options -- both
+  `npx vitest run tests/unit/agent/engine` and `npx tsc --noEmit` came back
+  clean. Did not touch any src/ file -- no bugs found that needed a fix.
+- Pushed to origin/task/03-unit-content-engine. Ready for the Integrator
+  (rebase onto `integration` once it exists and onto whatever vitest.config
+  task 01 lands, per the Decisions note above).
