@@ -379,7 +379,7 @@ describe("listPages / getPage", () => {
 
 describe("createMenu (nav menu assignment)", () => {
   it("creates the menu, adds only pages not already on it, and assigns the primary location", async () => {
-    execWpCliMock.mockImplementation((_id, args) => {
+    execWpCliMock.mockImplementation(((_id: string, args: string[]) => {
       if (args[0] === "menu" && args[1] === "create") return Promise.resolve(stdout(""));
       if (args[0] === "menu" && args[1] === "item" && args[2] === "list") {
         // Existing menu already has object_id 5 on it (the "about" page).
@@ -393,7 +393,7 @@ describe("createMenu (nav menu assignment)", () => {
         return Promise.resolve(stdout(""));
       }
       return Promise.resolve(stdout(""));
-    });
+    }) as typeof execWpCli);
 
     await createMenu(makeProject(), "primary-menu", ["home", "about"]);
 
@@ -407,10 +407,10 @@ describe("createMenu (nav menu assignment)", () => {
   });
 
   it("tolerates `menu create` failing on a re-run (idempotent-ish) without throwing", async () => {
-    execWpCliMock.mockImplementation((_id, args) => {
+    execWpCliMock.mockImplementation(((_id: string, args: string[]) => {
       if (args[0] === "menu" && args[1] === "create") return Promise.reject(new Error("menu already exists"));
       return Promise.resolve(stdout(""));
-    });
+    }) as typeof execWpCli);
     await expect(createMenu(makeProject(), "primary-menu", [])).resolves.toBeUndefined();
   });
 });
@@ -430,7 +430,8 @@ describe("removeMenuItemForPage", () => {
       "--fields=db_id,object_id",
       "--format=csv",
     ]);
-    expect(execWpCliMock).toHaveBeenNthCalledWith(2, "proj-1", ["menu", "item", "delete", "101"]);
+    // object_id 5 (the page being removed) is on row "102,5" -> db_id 102.
+    expect(execWpCliMock).toHaveBeenNthCalledWith(2, "proj-1", ["menu", "item", "delete", "102"]);
   });
 
   it("does nothing when no row matches the page id", async () => {

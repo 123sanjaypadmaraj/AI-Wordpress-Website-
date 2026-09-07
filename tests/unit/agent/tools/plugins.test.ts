@@ -189,10 +189,10 @@ describe("installAndConfigurePlugin -- per-plugin configuration (PLG-03)", () =>
   });
 
   it("wp-super-cache: a failure in the eval snippet is swallowed, not thrown (best-effort)", async () => {
-    execWpCliMock.mockImplementation((_id, args) => {
+    execWpCliMock.mockImplementation(((_id: string, args: string[]) => {
       if (args[0] === "eval") return Promise.reject(new Error("php fatal"));
       return Promise.resolve({ stdout: "", stderr: "" });
-    });
+    }) as typeof execWpCli);
     await expect(installAndConfigurePlugin(makeProject(), "wp-super-cache")).resolves.toBeUndefined();
   });
 
@@ -216,10 +216,10 @@ describe("installAndConfigurePlugin -- per-plugin configuration (PLG-03)", () =>
   );
 
   it("tolerates `plugin activate` failing after install (treated as idempotent) without throwing", async () => {
-    execWpCliMock.mockImplementation((_id, args) => {
+    execWpCliMock.mockImplementation(((_id: string, args: string[]) => {
       if (args[0] === "plugin" && args[1] === "activate") return Promise.reject(new Error("already active"));
       return Promise.resolve({ stdout: "", stderr: "" });
-    });
+    }) as typeof execWpCli);
     await expect(installAndConfigurePlugin(makeProject(), "contact-form-7")).resolves.toBeUndefined();
   });
 });

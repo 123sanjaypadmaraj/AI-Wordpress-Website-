@@ -1,8 +1,8 @@
 ---
-state: in-progress
+state: done
 owner: 05-unit-wp-tools
 started: 2026-09-07T13:16:38Z
-summary: Writing tests/unit/agent/tools/{wordpress,plugins,childtheme,checkpoint,export}.test.ts. wordpress.test.ts and plugins.test.ts done; childtheme/checkpoint/export in progress.
+summary: 103 unit tests across tests/unit/agent/tools/{wordpress,plugins,childtheme,checkpoint,export}.test.ts (exact WP-CLI argv assertions, plugin-allowlist enforcement, real generated-CSS assertions, checkpoint/backup round-trips, export bundle contents). One real P0 fix in export.ts -- the "credential-free" export was leaking the live DB password -- with a regression test. All pass typecheck + lint + vitest against 01's harness.
 ---
 
 ## Decisions
@@ -70,11 +70,53 @@ generic secret-shaped substrings. Verified this test fails against the
 pre-fix code (temporarily reverted the `redactSecrets` call, confirmed the
 grep check catches the leaked password; re-applied the fix).
 
+## Verification
+
+01-test-harness pushed real (committed) work to `task/01-test-harness`
+partway through this session (`f0f81ce`), still not merged into
+`integration` as of this writing. Verified against that real, committed
+harness (not just the earlier uncommitted WIP): copied this branch's 5 test
+files + the fixed `export.ts` into the `aiwp-task-01` worktree as a
+scratch execution environment only (nothing committed there, its own git
+state fully restored/untouched afterward -- confirmed clean with `git
+status` before finishing), and ran:
+
+- `npx vitest run` (apps/agent workspace) -- **103/103 passed**, all 5
+  files.
+- `npx tsc -p tests/tsconfig.json --noEmit` -- clean (had to cast 4
+  `execWpCliMock.mockImplementation(...)` callbacks `as typeof
+  execWpCli`, since `execWpCli`'s real return type is `PromiseWithChild`
+  from `promisify(execFile)`, not a plain `Promise` -- fixed in this
+  branch's test files).
+- `npx tsc --noEmit` (apps/agent workspace, i.e. `export.ts` itself) --
+  clean.
+- `npx eslint src/tools/export.ts` -- clean.
+- Confirmed the SECURITY FIX regression test actually catches the bug:
+  temporarily reverted `redactSecrets()`'s use in the scratch copy,
+  reran `export.test.ts` -- 3 tests failed including "never lets the real
+  DB password ... reach any file in the bundle", confirming it's a real
+  regression test and not a tautology. Re-applied the fix, reran -- green.
+
+This branch itself doesn't carry 01's harness files (vitest.config.ts,
+docs/TESTING.md, tests/tsconfig.json, root/agent package.json changes) --
+those are 01's to add at merge time, same pattern task 04 used (confirmed
+by checking their worktree). `npm run typecheck`/`npm run build` from repo
+root aren't runnable on this branch alone until 01 is merged in; the
+verification above is the equivalent check done against 01's real branch
+directly.
+
 ## Log
 
 - 13:16 UTC -- worktree set up, read docs/TESTING.md (from aiwp-task-01,
-  uncommitted) and all 5 source files under test. Found and fixed the
+  then-uncommitted) and all 5 source files under test. Found and fixed the
   export.ts secret-leak above.
-- wordpress.test.ts and plugins.test.ts written (full WP-CLI argv
-  assertions per file; plugin allowlist + per-plugin configurator
-  coverage). childtheme/checkpoint/export in progress.
+- wordpress.test.ts and plugins.test.ts written, committed, pushed (WIP).
+- childtheme.test.ts, checkpoint.test.ts, export.test.ts written.
+- Received and answered a cross-session ownership check (another session
+  confirming task 05 wasn't stalled before it considered picking it up) --
+  confirmed active, no handoff needed.
+- Ran full verification (see above); fixed 3 test-file bugs found along
+  the way (a wrong expected db_id in a removeMenuItemForPage test, an
+  exportsListDir()-has-a-mkdir-side-effect false assumption, and a
+  Node-version-fragile recursive-readdir helper) plus the 4 TS typing
+  casts. All green. Status set to done.
