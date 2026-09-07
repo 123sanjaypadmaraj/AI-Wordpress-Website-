@@ -9,7 +9,11 @@ vi.mock("@/lib/api", () => ({
   api: {
     listMessages: vi.fn(),
     sendMessage: vi.fn(),
-    agentUrl: "http://localhost:4001",
+    // PRV-05 (via SEC-02's same-origin proxy): ChatPanel builds the
+    // EventSource URL through this rather than a raw agentUrl string -- see
+    // apps/web/lib/api.ts.
+    streamUrl: (id: string, text: string) =>
+      `/api/agent/projects/${id}/messages/stream?text=${encodeURIComponent(text)}`,
   },
 }));
 

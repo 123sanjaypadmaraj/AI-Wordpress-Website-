@@ -239,7 +239,7 @@ export function BuilderSidePanel({
           <div className="space-y-4">
             {project.status === "ERROR" && (
               <div role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
-                The build failed. See the log below for details -- the Chat tab or History tab's checkpoints
+                The build failed. See the log below for details -- the Chat tab or History tab&apos;s checkpoints
                 can help you retry or undo whatever change triggered it.
               </div>
             )}
