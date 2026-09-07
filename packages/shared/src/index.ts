@@ -253,6 +253,15 @@ export const TOOL_NAMES = [
   "update_site_settings",
   "run_wp_cli",
   "capture_screenshot",
+  // SECURITY FIX (task 08, folding in a P0 finding from task 04's dispatcher
+  // review): these three used to bypass the dispatcher entirely -- routes/
+  // projects.ts called store.ts/tools/checkpoint.ts directly, with no
+  // permission-tier gate and no audit-log entry, despite restoreCheckpoint/
+  // restoreBackup running a real `wp db import` against the live site and
+  // delete_project being irreversible. See apps/agent/src/tools/dispatcher.ts.
+  "delete_project",
+  "restore_checkpoint",
+  "restore_backup",
 ] as const;
 
 export type ToolName = (typeof TOOL_NAMES)[number];
@@ -278,6 +287,9 @@ export const TOOL_PERMISSIONS: Record<ToolName, ToolPermission> = {
   update_site_settings: "write",
   run_wp_cli: "destructive",
   capture_screenshot: "read",
+  delete_project: "destructive",
+  restore_checkpoint: "destructive",
+  restore_backup: "destructive",
 };
 
 // ---------------------------------------------------------------------------

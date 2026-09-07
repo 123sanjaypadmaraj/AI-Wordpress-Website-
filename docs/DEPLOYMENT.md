@@ -18,7 +18,12 @@ hosts:
    URL of your deployed `apps/agent` instance (see `apps/web/.env.example`).
    Without it, the deployed site falls back to `http://localhost:4001`,
    which won't exist in production.
-3. Deploy. `npm run build -w packages/shared -w apps/web` is the build
+3. Set **`AGENT_API_KEY`** to the same value as `apps/agent`'s
+   `AGENT_API_KEY` below. This is a server-only variable (do NOT prefix it
+   `NEXT_PUBLIC_`) -- the browser never talks to `apps/agent` directly, it
+   calls apps/web's own `app/api/agent/[...path]` route, which attaches this
+   key server-side and proxies the request through. See docs/SECURITY.md.
+4. Deploy. `npm run build -w packages/shared -w apps/web` is the build
    command; it does not touch `apps/agent`.
 
 ## apps/agent
@@ -31,7 +36,14 @@ out to `docker compose` per project -- see `infrastructure/docker/`). Set:
 - `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` / `GROQ_API_KEY` (optional -- set
   one to enable AI assistance, omit all to fall back to local heuristics;
   see `apps/agent/src/llm/client.ts` and `AI_PROVIDER` if more than one is set)
-
-`apps/agent` currently allows CORS from any origin (`app.use(cors())` in
-`apps/agent/src/server.ts`). Once the Vercel URL is known, consider
-restricting that to just your deployed web origin.
+- **`WEB_ORIGIN`**: set this to your deployed `apps/web` URL once it's known.
+  CORS used to be wide open (`app.use(cors())`, any origin) -- it's now
+  restricted to exactly this one origin, defaulting to
+  `http://localhost:3000` for local dev. (Resolved: this section used to
+  flag the wide-open CORS as a TODO.)
+- **`AGENT_API_KEY`**: set this to a real random secret before deploying
+  anywhere reachable beyond your own machine. Every route except `/health`
+  now requires it (as an `X-Agent-Key` header) -- previously there was no
+  authentication at all, and every route has Docker-socket-level power. See
+  docs/SECURITY.md for the full threat model and what this does and doesn't
+  protect against.
