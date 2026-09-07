@@ -2,7 +2,7 @@ import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync }
 import { join } from "node:path";
 import archiver from "archiver";
 import type { Project } from "@ai-wp/shared";
-import { projectDir, composeCp, execWpCli } from "../docker/compose.js";
+import { projectDir, composeCp, execWpCli, readProjectSecret } from "../docker/compose.js";
 import { childThemeSlug, childThemeStagingDir } from "./childtheme.js";
 
 /**
@@ -53,6 +53,29 @@ included in this export). Then:
 `;
 }
 
+/**
+ * SECURITY FIX (found while writing this file's test, task 05): the
+ * per-project docker-compose.yml on disk has this project's real DB
+ * password / DB root password baked directly into its `environment:`
+ * blocks (see `renderCompose` in `../docker/compose.js`) -- fine for the
+ * live container, which needs them, but `exportProject` below used to copy
+ * that file into the export bundle *verbatim*, directly contradicting this
+ * module's own doc comment and the README's "credential-free" export
+ * claim: every exported zip shipped a live DB credential in
+ * `deploy/docker-compose.yml`. Redact every secret this project's `.env`
+ * actually holds before the compose file leaves this function, so the
+ * bundle never contains a literal credential regardless of how the source
+ * compose file was rendered.
+ */
+function redactSecrets(composeYaml: string, projectId: string): string {
+  let redacted = composeYaml;
+  for (const key of ["DB_PASSWORD", "DB_ROOT_PASSWORD", "WP_ADMIN_PASSWORD"]) {
+    const value = readProjectSecret(projectId, key);
+    if (value) redacted = redacted.split(value).join(`\${${key}}`);
+  }
+  return redacted;
+}
+
 export interface ExportResult {
   file: string;
   relativePath: string;
@@ -96,7 +119,8 @@ export async function exportProject(project: Project): Promise<ExportResult> {
   const composeFile = join(projectDir(project.id), "docker-compose.yml");
   if (existsSync(composeFile)) {
     mkdirSync(join(workDir, "deploy"), { recursive: true });
-    writeFileSync(join(workDir, "deploy", "docker-compose.yml"), readFileSync(composeFile));
+    const composeYaml = redactSecrets(readFileSync(composeFile, "utf-8"), project.id);
+    writeFileSync(join(workDir, "deploy", "docker-compose.yml"), composeYaml);
   }
   writeFileSync(join(workDir, "README.md"), deployReadme(project));
 
