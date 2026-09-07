@@ -7,16 +7,25 @@ import { StatusBadge } from "@/components/StatusBadge";
 
 type Tab = "requirements" | "themes" | "progress" | "preview" | "content" | "history" | "settings";
 
+// "STOPPED" rides alongside "READY" in every step below, not just the last
+// one: apps/agent/src/routes/projects.ts's environment/stop route only ever
+// moves a project to STOPPED from a completed build (Settings tab's "Stop
+// environment" button only appears once docker.status is "running", i.e.
+// post-build), and environment/start puts it straight back to READY. Without
+// this, stopping a finished site's environment made this checklist regress
+// to "nothing done yet", which reads as the build having been wiped rather
+// than just paused. If a future change ever lets a project stop mid-build,
+// this assumption -- and the route it depends on -- needs revisiting together.
 const PIPELINE_STEPS: Array<{ label: string; states: string[] }> = [
-  { label: "Requirements analyzed", states: ["SPECIFICATION_READY", "THEME_SELECTION", "ENVIRONMENT_CREATING", "WORDPRESS_READY", "THEME_INSTALLING", "PLUGINS_INSTALLING", "GENERATING", "CONFIGURING", "TESTING", "VISUAL_REVIEW", "READY"] },
-  { label: "Theme selected", states: ["ENVIRONMENT_CREATING", "WORDPRESS_READY", "THEME_INSTALLING", "PLUGINS_INSTALLING", "GENERATING", "CONFIGURING", "TESTING", "VISUAL_REVIEW", "READY"] },
-  { label: "WordPress created", states: ["WORDPRESS_READY", "THEME_INSTALLING", "PLUGINS_INSTALLING", "GENERATING", "CONFIGURING", "TESTING", "VISUAL_REVIEW", "READY"] },
-  { label: "Theme + plugins installed", states: ["PLUGINS_INSTALLING", "GENERATING", "CONFIGURING", "TESTING", "VISUAL_REVIEW", "READY"] },
-  { label: "Pages generated", states: ["CONFIGURING", "TESTING", "VISUAL_REVIEW", "READY"] },
-  { label: "Navigation configured", states: ["TESTING", "VISUAL_REVIEW", "READY"] },
-  { label: "Tests run", states: ["VISUAL_REVIEW", "READY"] },
-  { label: "Visual review complete", states: ["READY"] },
-  { label: "Ready", states: ["READY"] },
+  { label: "Requirements analyzed", states: ["SPECIFICATION_READY", "THEME_SELECTION", "ENVIRONMENT_CREATING", "WORDPRESS_READY", "THEME_INSTALLING", "PLUGINS_INSTALLING", "GENERATING", "CONFIGURING", "TESTING", "VISUAL_REVIEW", "READY", "STOPPED"] },
+  { label: "Theme selected", states: ["ENVIRONMENT_CREATING", "WORDPRESS_READY", "THEME_INSTALLING", "PLUGINS_INSTALLING", "GENERATING", "CONFIGURING", "TESTING", "VISUAL_REVIEW", "READY", "STOPPED"] },
+  { label: "WordPress created", states: ["WORDPRESS_READY", "THEME_INSTALLING", "PLUGINS_INSTALLING", "GENERATING", "CONFIGURING", "TESTING", "VISUAL_REVIEW", "READY", "STOPPED"] },
+  { label: "Theme + plugins installed", states: ["PLUGINS_INSTALLING", "GENERATING", "CONFIGURING", "TESTING", "VISUAL_REVIEW", "READY", "STOPPED"] },
+  { label: "Pages generated", states: ["CONFIGURING", "TESTING", "VISUAL_REVIEW", "READY", "STOPPED"] },
+  { label: "Navigation configured", states: ["TESTING", "VISUAL_REVIEW", "READY", "STOPPED"] },
+  { label: "Tests run", states: ["VISUAL_REVIEW", "READY", "STOPPED"] },
+  { label: "Visual review complete", states: ["READY", "STOPPED"] },
+  { label: "Ready", states: ["READY", "STOPPED"] },
 ];
 
 const KNOWN_PAGES = [
@@ -138,10 +147,13 @@ export function BuilderSidePanel({
 
   return (
     <div className="flex h-full min-h-0 flex-col rounded-xl border border-border bg-surface">
-      <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-border p-2 text-sm">
+      <div role="tablist" aria-label="Project sections" className="flex shrink-0 gap-1 overflow-x-auto border-b border-border p-2 text-sm">
         {tabs.map((t) => (
           <button
             key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={tab === t.id}
             onClick={() => setTab(t.id)}
             className={`whitespace-nowrap rounded-md px-2.5 py-1.5 ${tab === t.id ? "bg-accent-soft text-accent" : "text-ink-muted hover:bg-surface-alt"}`}
           >
@@ -225,6 +237,12 @@ export function BuilderSidePanel({
 
         {tab === "progress" && (
           <div className="space-y-4">
+            {project.status === "ERROR" && (
+              <div role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+                The build failed. See the log below for details -- the Chat tab or History tab's checkpoints
+                can help you retry or undo whatever change triggered it.
+              </div>
+            )}
             <div>
               <div className="mb-2 flex items-center justify-between">
                 <span className="text-sm font-medium">Build pipeline</span>
@@ -457,11 +475,11 @@ function RequirementsTab({ project, onProjectUpdate }: { project: Project; onPro
 
   return (
     <div className="space-y-4 text-sm">
-      <LabeledField label="Website type">
-        <input value={type} onChange={(e) => setType(e.target.value)} className="w-full rounded-md border border-border bg-canvas px-2 py-1 text-sm" />
+      <LabeledField label="Website type" htmlFor="req-type">
+        <input id="req-type" value={type} onChange={(e) => setType(e.target.value)} className="w-full rounded-md border border-border bg-canvas px-2 py-1 text-sm" />
       </LabeledField>
-      <LabeledField label="Audience (comma-separated)">
-        <input value={audience} onChange={(e) => setAudience(e.target.value)} className="w-full rounded-md border border-border bg-canvas px-2 py-1 text-sm" />
+      <LabeledField label="Audience (comma-separated)" htmlFor="req-audience">
+        <input id="req-audience" value={audience} onChange={(e) => setAudience(e.target.value)} className="w-full rounded-md border border-border bg-canvas px-2 py-1 text-sm" />
       </LabeledField>
       <LabeledField label="Pages">
         <div className="flex flex-wrap gap-1.5">
@@ -477,27 +495,29 @@ function RequirementsTab({ project, onProjectUpdate }: { project: Project; onPro
           ))}
         </div>
       </LabeledField>
-      <LabeledField label="Visual style">
-        <select value={style} onChange={(e) => setStyle(e.target.value)} className="w-full rounded-md border border-border bg-canvas px-2 py-1 text-sm">
+      <LabeledField label="Visual style" htmlFor="req-style">
+        <select id="req-style" value={style} onChange={(e) => setStyle(e.target.value)} className="w-full rounded-md border border-border bg-canvas px-2 py-1 text-sm">
           {Array.from(new Set([style, ...STYLE_OPTIONS])).map((s) => (
             <option key={s} value={s}>{s}</option>
           ))}
         </select>
       </LabeledField>
       <div className="flex flex-wrap items-end gap-4">
-        <LabeledField label="Primary color">
-          <input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="h-8 w-14 rounded border border-border bg-canvas" />
+        <LabeledField label="Primary color" htmlFor="req-primary-color">
+          <input id="req-primary-color" type="color" value={color} onChange={(e) => setColor(e.target.value)} className="h-8 w-14 rounded border border-border bg-canvas" />
         </LabeledField>
-        <LabeledField label="Secondary color">
+        <LabeledField label="Secondary color" htmlFor="req-secondary-color">
           <input
+            id="req-secondary-color"
             type="color"
             value={secondaryColor}
             onChange={(e) => setSecondaryColor(e.target.value)}
             className="h-8 w-14 rounded border border-border bg-canvas"
           />
         </LabeledField>
-        <LabeledField label="Corner style">
+        <LabeledField label="Corner style" htmlFor="req-radius">
           <select
+            id="req-radius"
             value={radius}
             onChange={(e) => setRadius(e.target.value as typeof radius)}
             className="rounded-md border border-border bg-canvas px-2 py-1 text-sm"
@@ -509,15 +529,15 @@ function RequirementsTab({ project, onProjectUpdate }: { project: Project; onPro
         </LabeledField>
       </div>
       <div className="flex flex-wrap items-end gap-4">
-        <LabeledField label="Heading font">
-          <select value={headingFont} onChange={(e) => setHeadingFont(e.target.value)} className="rounded-md border border-border bg-canvas px-2 py-1 text-sm">
+        <LabeledField label="Heading font" htmlFor="req-heading-font">
+          <select id="req-heading-font" value={headingFont} onChange={(e) => setHeadingFont(e.target.value)} className="rounded-md border border-border bg-canvas px-2 py-1 text-sm">
             {Array.from(new Set([headingFont, ...FONT_OPTIONS])).map((f) => (
               <option key={f} value={f}>{f}</option>
             ))}
           </select>
         </LabeledField>
-        <LabeledField label="Body font">
-          <select value={bodyFont} onChange={(e) => setBodyFont(e.target.value)} className="rounded-md border border-border bg-canvas px-2 py-1 text-sm">
+        <LabeledField label="Body font" htmlFor="req-body-font">
+          <select id="req-body-font" value={bodyFont} onChange={(e) => setBodyFont(e.target.value)} className="rounded-md border border-border bg-canvas px-2 py-1 text-sm">
             {Array.from(new Set([bodyFont, ...FONT_OPTIONS])).map((f) => (
               <option key={f} value={f}>{f}</option>
             ))}
@@ -545,7 +565,9 @@ function RequirementsTab({ project, onProjectUpdate }: { project: Project; onPro
 function Chip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
   return (
     <button
+      type="button"
       onClick={onClick}
+      aria-pressed={active}
       className={`rounded-full border px-2.5 py-1 text-xs ${active ? "border-accent bg-accent-soft text-accent" : "border-border text-ink-muted"}`}
     >
       {label}
@@ -553,10 +575,29 @@ function Chip({ label, active, onClick }: { label: string; active: boolean; onCl
   );
 }
 
-function LabeledField({ label, children }: { label: string; children: React.ReactNode }) {
+// `htmlFor` associates the label with a single real form control (input/
+// select) via a proper <label>, so screen readers get an accessible name --
+// the visible heading text alone (a plain <div>) isn't programmatically
+// linked to anything. Omit it for a group of several controls (e.g. the
+// Pages/Features chip lists below): those get `role="group"` +
+// `aria-label` instead, since wrapping multiple buttons in one <label>
+// would make clicking the heading text activate just the first one.
+function LabeledField({ label, htmlFor, children }: { label: string; htmlFor?: string; children: React.ReactNode }) {
+  if (htmlFor) {
+    return (
+      <div>
+        <label htmlFor={htmlFor} className="mb-1 block text-xs uppercase tracking-wide text-ink-muted">
+          {label}
+        </label>
+        {children}
+      </div>
+    );
+  }
   return (
-    <div>
-      <div className="mb-1 text-xs uppercase tracking-wide text-ink-muted">{label}</div>
+    <div role="group" aria-label={label}>
+      <div className="mb-1 text-xs uppercase tracking-wide text-ink-muted" aria-hidden="true">
+        {label}
+      </div>
       {children}
     </div>
   );
@@ -695,16 +736,18 @@ function ContentTab({ project }: { project: Project }) {
         {selectedId !== null && loadingPage && <p className="text-sm text-ink-muted">Loading page…</p>}
         {selectedId !== null && !loadingPage && (
           <div className="space-y-3">
-            <LabeledField label="Title">
+            <LabeledField label="Title" htmlFor="content-title">
               <input
+                id="content-title"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 className="w-full rounded-md border border-border bg-canvas px-2 py-1 text-sm"
               />
             </LabeledField>
 
-            <LabeledField label="Content (Gutenberg block HTML)">
+            <LabeledField label="Content (Gutenberg block HTML)" htmlFor="content-body">
               <textarea
+                id="content-body"
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
                 rows={14}
@@ -731,9 +774,12 @@ function ContentTab({ project }: { project: Project }) {
             {saveError && <p className="text-xs text-rose-400">{saveError}</p>}
 
             <div className="border-t border-border pt-3">
-              <div className="mb-1 text-xs uppercase tracking-wide text-ink-muted">Ask AI to edit this page</div>
+              <label htmlFor="content-ai-instruction" className="mb-1 block text-xs uppercase tracking-wide text-ink-muted">
+                Ask AI to edit this page
+              </label>
               <div className="flex gap-2">
                 <input
+                  id="content-ai-instruction"
                   value={instruction}
                   onChange={(e) => setInstruction(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && askAi()}
