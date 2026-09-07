@@ -8,10 +8,17 @@ import { buildDesignSystem } from "../engine/designSystem.js";
 import { classifyEditIntent } from "../engine/editIntent.js";
 import { applyEditIntent } from "../engine/incremental.js";
 import { aiAvailable, streamAck } from "../llm/client.js";
+import { chatMessageLimiter } from "../middleware/rateLimit.js";
 
 export const messagesRouter = Router();
 
 const PRE_BUILD_STATES = new Set(["CREATED", "REQUIREMENTS", "SPECIFICATION_READY"]);
+
+// Every chat turn can reach an AI provider (see handleTurn -> engine/*.ts ->
+// llm/client.ts) -- an unbounded body is an easy way to run up real token
+// cost against this endpoint, so cap it well above anything a real chat
+// message needs.
+const MAX_MESSAGE_LENGTH = 4000;
 
 interface TurnResult {
   replyText: string;
@@ -76,12 +83,15 @@ messagesRouter.get("/:id/messages", (req, res) => {
   res.json(store.listMessages(project.id));
 });
 
-messagesRouter.post("/:id/messages", async (req, res) => {
+messagesRouter.post("/:id/messages", chatMessageLimiter, async (req, res) => {
   const project = store.getProject(req.params.id);
   if (!project) return res.status(404).json({ error: "Project not found" });
 
   const text = (req.body?.text as string | undefined)?.trim();
   if (!text) return res.status(400).json({ error: "text is required" });
+  if (text.length > MAX_MESSAGE_LENGTH) {
+    return res.status(400).json({ error: `text must be ${MAX_MESSAGE_LENGTH} characters or fewer` });
+  }
 
   const now = () => new Date().toISOString();
   const userMessage: Message = { id: nanoid(10), projectId: project.id, role: "user", text, createdAt: now() };
@@ -119,11 +129,14 @@ messagesRouter.post("/:id/messages", async (req, res) => {
 // PRV-05: true token streaming over SSE. EventSource only supports GET, so
 // the message travels as a query param on its own endpoint rather than
 // replacing the POST above -- non-streaming clients keep working unchanged.
-messagesRouter.get("/:id/messages/stream", async (req, res) => {
+messagesRouter.get("/:id/messages/stream", chatMessageLimiter, async (req, res) => {
   const project = store.getProject(req.params.id);
   if (!project) return res.status(404).json({ error: "Project not found" });
   const text = (req.query.text as string | undefined)?.trim();
   if (!text) return res.status(400).json({ error: "text is required" });
+  if (text.length > MAX_MESSAGE_LENGTH) {
+    return res.status(400).json({ error: `text must be ${MAX_MESSAGE_LENGTH} characters or fewer` });
+  }
 
   res.set({ "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
   res.flushHeaders();

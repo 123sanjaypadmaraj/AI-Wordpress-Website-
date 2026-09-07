@@ -8,13 +8,15 @@ import {
   type SiteSpecification,
 } from "@ai-wp/shared";
 import { store } from "../db/store.js";
-import { destroyEnvironment, restartEnvironment, startEnvironment, stopEnvironment } from "../docker/compose.js";
-import { createBackup, createCheckpoint, restoreBackup, restoreCheckpoint } from "../tools/checkpoint.js";
+import { restartEnvironment, startEnvironment, stopEnvironment } from "../docker/compose.js";
+import { createBackup, createCheckpoint } from "../tools/checkpoint.js";
 import { exportProject, exportsListDir } from "../tools/export.js";
-import { readScreenshot } from "../tools/screenshot.js";
+import { screenshotDir } from "../tools/screenshot.js";
+import { callTool } from "../tools/dispatcher.js";
 import { applyEditIntent, applyDesignFieldsChange } from "../engine/incremental.js";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { projectCreateLimiter } from "../middleware/rateLimit.js";
+import { resolveSafe } from "../middleware/safePath.js";
 
 export const projectsRouter = Router();
 
@@ -33,8 +35,8 @@ projectsRouter.get("/", (_req, res) => {
   res.json(store.listProjects().map(toSummary));
 });
 
-projectsRouter.post("/", (req, res) => {
-  const name = (req.body?.name as string | undefined)?.trim() || "Untitled Project";
+projectsRouter.post("/", projectCreateLimiter, (req, res) => {
+  const name = (req.body?.name as string | undefined)?.trim().slice(0, 200) || "Untitled Project";
   const now = new Date().toISOString();
   const project: Project = {
     id: nanoid(10),
@@ -147,13 +149,20 @@ projectsRouter.patch("/:id/spec", async (req, res) => {
   res.json({ project: store.getProject(project.id), applied, errors });
 });
 
+// SECURITY FIX: this used to tear down Docker + delete the project directly,
+// bypassing the dispatcher entirely -- no permission-tier gate, no audit-log
+// entry, for a call at least as destructive as delete_page/run_wp_cli (both
+// already gated + audited). This DELETE request is itself the explicit user
+// action / confirmation UI, so it passes confirm: true through -- see
+// apps/agent/src/tools/dispatcher.ts's "delete_project" case.
 projectsRouter.delete("/:id", async (req, res) => {
   const project = store.getProject(req.params.id);
   if (!project) return res.status(404).json({ error: "Project not found" });
-  if (project.docker.status !== "none") {
-    await destroyEnvironment(project).catch(() => undefined);
+  try {
+    await callTool(project, "delete_project", {}, { confirm: true, source: "manual" });
+  } catch (e) {
+    return res.status(500).json({ error: String(e) });
   }
-  store.deleteProject(req.params.id);
   res.status(204).end();
 });
 
@@ -258,11 +267,14 @@ projectsRouter.post("/:id/checkpoints", async (req, res) => {
   }
 });
 
+// SECURITY FIX: same dispatcher-bypass issue as DELETE /:id above --
+// restoreCheckpoint runs a real `wp db import` against the live site (an
+// undo), yet used to be called directly with no gate or audit entry.
 projectsRouter.post("/:id/checkpoints/:checkpointId/restore", async (req, res) => {
   const project = store.getProject(req.params.id);
   if (!project) return res.status(404).json({ error: "Project not found" });
   try {
-    await restoreCheckpoint(project, req.params.checkpointId);
+    await callTool(project, "restore_checkpoint", { checkpointId: req.params.checkpointId }, { confirm: true, source: "manual" });
     res.json(store.getProject(project.id));
   } catch (e) {
     res.status(400).json({ error: String(e) });
@@ -291,11 +303,12 @@ projectsRouter.post("/:id/backups", async (req, res) => {
   }
 });
 
+// SECURITY FIX: same dispatcher-bypass issue as the checkpoint restore above.
 projectsRouter.post("/:id/backups/:backupId/restore", async (req, res) => {
   const project = store.getProject(req.params.id);
   if (!project) return res.status(404).json({ error: "Project not found" });
   try {
-    await restoreBackup(project, req.params.backupId);
+    await callTool(project, "restore_backup", { backupId: req.params.backupId }, { confirm: true, source: "manual" });
     res.json(store.getProject(project.id));
   } catch (e) {
     res.status(400).json({ error: String(e) });
@@ -317,19 +330,37 @@ projectsRouter.post("/:id/export", async (req, res) => {
   }
 });
 
+// SECURITY FIX (found during task 08's input-validation pass): this route
+// had NO project-existence check at all and joined `req.params.file`
+// (attacker-controlled) straight onto a directory path -- Express decodes
+// each route param independently, so a request like
+// `GET /projects/x/export/..%2F..%2F..%2Fetc%2Fpasswd` arrived here with
+// `file === "../../../etc/passwd"` and `res.download()` happily served it.
+// Same bug, same fix pattern, as the screenshots route right below.
 projectsRouter.get("/:id/export/:file", (req, res) => {
-  const file = join(exportsListDir(req.params.id), req.params.file);
-  if (!existsSync(file)) return res.status(404).json({ error: "Export not found" });
+  const project = store.getProject(req.params.id);
+  if (!project) return res.status(404).json({ error: "Project not found" });
+  const file = resolveSafe(exportsListDir(project.id), req.params.file);
+  if (!file || !existsSync(file)) return res.status(404).json({ error: "Export not found" });
   res.download(file);
 });
 
 // TST-03: screenshot readback (used by both the pipeline's own visual
 // review and any manual "capture screenshot" trigger from the UI).
+//
+// SECURITY FIX: same arbitrary-file-read bug as the export route above --
+// no project-existence check, and both `:id` and `:file` reached
+// `readScreenshot()`'s bare `join()` unsanitized. Validated with
+// resolveSafe() before the read instead of trusting readScreenshot's own
+// join (see apps/agent/src/tools/screenshot.ts).
 projectsRouter.get("/:id/screenshots/:file", (req, res) => {
+  const project = store.getProject(req.params.id);
+  if (!project) return res.status(404).json({ error: "Project not found" });
+  const file = resolveSafe(screenshotDir(project.id), req.params.file);
+  if (!file) return res.status(404).json({ error: "Screenshot not found" });
   try {
-    const buffer = readScreenshot(req.params.id, req.params.file);
     res.set("Content-Type", "image/png");
-    res.send(buffer);
+    res.send(readFileSync(file));
   } catch {
     res.status(404).json({ error: "Screenshot not found" });
   }

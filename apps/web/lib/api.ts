@@ -12,10 +12,16 @@ import type {
   ThemeRecommendation,
 } from "@ai-wp/shared";
 
-const AGENT_URL = process.env.NEXT_PUBLIC_AGENT_URL ?? "http://localhost:4001";
+// SEC: the browser used to call apps/agent directly at NEXT_PUBLIC_AGENT_URL.
+// Now that apps/agent requires an API key (see apps/agent/src/middleware/
+// auth.ts), that call goes through this same-origin Next.js route instead
+// (app/api/agent/[...path]/route.ts), which holds the real key server-side
+// and proxies through -- a NEXT_PUBLIC_* var is bundled into client JS, so
+// the key itself must never live in one.
+const AGENT_BASE = "/api/agent";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${AGENT_URL}${path}`, {
+  const res = await fetch(`${AGENT_BASE}${path}`, {
     ...init,
     headers: { "Content-Type": "application/json", ...init?.headers },
     cache: "no-store",
@@ -79,9 +85,9 @@ export const api = {
   // EXP-01/02
   exportProject: (id: string) =>
     request<{ relativePath: string; bytes: number }>(`/projects/${id}/export`, { method: "POST" }),
-  exportDownloadUrl: (id: string, relativePath: string) => `${AGENT_URL}/projects/${id}/export/${relativePath}`,
+  exportDownloadUrl: (id: string, relativePath: string) => `${AGENT_BASE}/projects/${id}/export/${relativePath}`,
 
-  screenshotUrl: (id: string, relativePath: string) => `${AGENT_URL}/projects/${id}/screenshots/${relativePath}`,
+  screenshotUrl: (id: string, relativePath: string) => `${AGENT_BASE}/projects/${id}/screenshots/${relativePath}`,
 
   // CMS-01: content editor
   listPages: (id: string) => request<CmsPageSummary[]>(`/projects/${id}/pages`),
@@ -94,7 +100,9 @@ export const api = {
       body: JSON.stringify({ instruction }),
     }),
 
-  agentUrl: AGENT_URL,
+  // PRV-05: EventSource only does GET with no custom headers, so it hits
+  // this same proxy path directly rather than going through request().
+  streamUrl: (id: string, text: string) => `${AGENT_BASE}/projects/${id}/messages/stream?text=${encodeURIComponent(text)}`,
 };
 
 export type { ChatChoice };

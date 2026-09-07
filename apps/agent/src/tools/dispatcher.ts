@@ -15,8 +15,9 @@ import {
   setHomepage,
   updatePage,
 } from "./wordpress.js";
-import { execWpCli } from "../docker/compose.js";
+import { destroyEnvironment, execWpCli } from "../docker/compose.js";
 import { captureScreenshot } from "./screenshot.js";
+import { restoreBackup, restoreCheckpoint } from "./checkpoint.js";
 
 /**
  * SEC-03/05/06: every WordPress-affecting operation -- whether triggered by
@@ -122,6 +123,31 @@ async function execute(project: Project, tool: ToolName, args: Record<string, un
       const { stdout } = await execWpCli(project.id, wpArgs);
       return { stdout };
     }
+    // SECURITY FIX (task 08 / task 04 P0 finding): restore_checkpoint,
+    // restore_backup, and delete_project used to be called directly from
+    // routes/projects.ts, bypassing this dispatcher -- no permission-tier
+    // gate, no audit-log entry -- despite being at least as destructive as
+    // delete_page/run_wp_cli (both already gated + audited). See
+    // packages/shared/src/index.ts's TOOL_NAMES comment for the rationale.
+    case "restore_checkpoint": {
+      const { checkpointId } = args as { checkpointId: string };
+      await restoreCheckpoint(project, checkpointId);
+      return {};
+    }
+    case "restore_backup": {
+      const { backupId } = args as { backupId: string };
+      await restoreBackup(project, backupId);
+      return {};
+    }
+    case "delete_project": {
+      // Deliberately does the real deletion here rather than leaving it to
+      // the route: see the special-cased skip in callTool()'s finally below
+      // -- once the project record is gone, callTool's usual
+      // store.saveProject(project) would silently resurrect it.
+      if (project.docker.status !== "none") await destroyEnvironment(project).catch(() => undefined);
+      store.deleteProject(project.id);
+      return {};
+    }
     default:
       throw new Error(`Tool "${tool}" is not implemented in the dispatcher yet`);
   }
@@ -164,6 +190,13 @@ export async function callTool(
     };
     project.auditLog.push(entry);
     if (project.auditLog.length > 300) project.auditLog.splice(0, project.auditLog.length - 300);
-    store.saveProject(project);
+    // A successful delete_project has already removed this project's record
+    // from the store (inside execute() above) -- saving `project` here would
+    // just write it straight back. Only skip on success: if deletion failed,
+    // the project still exists and this audit entry needs to land on it like
+    // any other.
+    if (!(tool === "delete_project" && ok)) {
+      store.saveProject(project);
+    }
   }
 }

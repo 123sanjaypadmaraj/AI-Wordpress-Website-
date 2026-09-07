@@ -48,8 +48,7 @@ export function ChatPanel({
     }
 
     await new Promise<void>((resolve) => {
-      const url = `${api.agentUrl}/projects/${project.id}/messages/stream?text=${encodeURIComponent(text)}`;
-      const es = new EventSource(url);
+      const es = new EventSource(api.streamUrl(project.id, text));
       let settled = false;
       const finish = () => {
         if (settled) return;
