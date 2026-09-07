@@ -17,6 +17,7 @@ export function ChatPanel({
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [streamingText, setStreamingText] = useState("");
+  const [sendError, setSendError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -35,12 +36,18 @@ export function ChatPanel({
     setSending(true);
     setInput("");
     setStreamingText("");
+    setSendError(null);
 
     if (typeof window === "undefined" || !("EventSource" in window)) {
       try {
         const { project: updated, messages: turn } = await api.sendMessage(project.id, text);
         setMessages((m) => [...m, ...turn]);
         onProjectUpdate(updated);
+      } catch (e) {
+        // Don't leave the user staring at a reset input with no idea their
+        // message never went anywhere -- surface it and give the text back.
+        setSendError(e instanceof Error ? e.message : "Could not reach the agent server.");
+        setInput(text);
       } finally {
         setSending(false);
       }
@@ -51,13 +58,31 @@ export function ChatPanel({
       const url = `${api.agentUrl}/projects/${project.id}/messages/stream?text=${encodeURIComponent(text)}`;
       const es = new EventSource(url);
       let settled = false;
-      const finish = () => {
-        if (settled) return;
-        settled = true;
+      const cleanup = () => {
         es.close();
         setSending(false);
         setStreamingText("");
         resolve();
+      };
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+      };
+      // Same dead-end as above, but for a mid-stream disconnect: the browser
+      // fires a plain `error` event (no reason) any time the connection
+      // drops before a "done" event closes it out cleanly -- flaky wifi, the
+      // agent server restarting, a proxy timeout. Previously this silently
+      // reset the composer with no explanation and quietly discarded
+      // whatever had streamed in so far.
+      const fail = () => {
+        if (settled) return;
+        settled = true;
+        setSendError(
+          "Lost connection to the agent server while generating a response. Your message wasn't saved -- try sending it again.",
+        );
+        setInput(text);
+        cleanup();
       };
 
       es.addEventListener("user_message", (e) => {
@@ -77,7 +102,7 @@ export function ChatPanel({
         onProjectUpdate(updated);
         finish();
       });
-      es.onerror = () => finish();
+      es.onerror = () => fail();
     });
   }
 
@@ -126,6 +151,11 @@ export function ChatPanel({
         {sending && !streamingText && <p className="text-xs text-ink-muted">AI is thinking…</p>}
         <div ref={bottomRef} />
       </div>
+      {sendError && (
+        <div role="alert" className="mx-3 mb-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+          {sendError}
+        </div>
+      )}
       {showUndo && (
         <div className="border-t border-border px-3 pt-2">
           <button
@@ -149,6 +179,7 @@ export function ChatPanel({
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="Describe what you need, or ask for a change…"
+          aria-label="Message"
           className="flex-1 rounded-lg border border-border bg-canvas px-3 py-2 text-sm outline-none focus:border-accent"
         />
         <button
