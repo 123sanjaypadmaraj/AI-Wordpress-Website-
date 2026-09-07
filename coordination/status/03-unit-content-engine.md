@@ -1,0 +1,52 @@
+---
+state: done
+owner: 03-unit-content-engine
+started: 2026-09-06T00:00:00Z
+summary: 127 passing unit tests across templates.ts, copywriter.ts, contentGenerator.ts, skills.ts
+---
+
+## Decisions
+
+- `origin/integration` does not exist yet and no `coordination/` directory had
+  been pushed by anyone as of task start, so per protocol step 1 I branched
+  `task/03-unit-content-engine` from `origin/main` instead. The Integrator
+  should create `integration` from `main`'s current tip (commit `ea4eba1`)
+  when it does the one-time setup, and this branch rebases cleanly onto it.
+- **No test runner exists in the repo yet** (task 01 / test-harness has not
+  landed — no vitest/jest in any package.json, no vitest.config.ts anywhere).
+  Per task 02's note (which my task explicitly points to), I am not blocking:
+  writing tests now using plain `import { describe, it, expect, vi } from
+  "vitest"` syntax against the documented convention
+  (`tests/unit/agent/engine/<module>.test.ts` mirroring `src/engine/<module>.ts`),
+  and will verify+adjust once task 01's config lands and I rebase.
+  - To actually execute and verify my own tests locally before task 01 lands,
+    I installed `vitest` as a devDependency scoped to `apps/agent/package.json`
+    only (the file I don't otherwise own) purely so `npx vitest run` works in
+    this worktree. This is a **shared-file touch** flagged per protocol rule 5
+    — it's an additive devDependency + a `test`/`test:unit` script entry only,
+    nothing removed. Task 01 should feel free to replace/reconcile this with
+    its own config at merge time; I did not add a vitest.config.ts (that's
+    task 01's file to own) and instead run tests via the CLI default config.
+
+## Log
+
+- Wrote and verified 127 passing tests across the 4 owned files:
+  - tests/unit/agent/engine/templates.test.ts (48 tests)
+  - tests/unit/agent/engine/copywriter.test.ts (35 tests)
+  - tests/unit/agent/engine/contentGenerator.test.ts (25 tests, includes a
+    "full page assembly" block combining layout.ts + copywriter.ts +
+    contentGenerator.ts + templates.ts's buildPageContent per the task's
+    "given a page type + spec + layout decision" bullet)
+  - tests/unit/agent/engine/skills.test.ts (19 tests, global fetch mocked,
+    covers found/no-match/non-ok/network-failure/malformed-body/slug-safety/
+    caching, plus SKILL_SOURCE=curated gating)
+  - Note: SKILL_SOURCE gating is tested (skillDiscoveryEnabled). THEME_SOURCE
+    doesn't affect any of my 4 owned modules (it only gates engine/themes.ts,
+    owned by task 02), so it isn't exercised here.
+- Verified with a scratch (uncommitted, --no-save) vitest install and a
+  scratch tsconfig extending apps/agent's own compiler options -- both
+  `npx vitest run tests/unit/agent/engine` and `npx tsc --noEmit` came back
+  clean. Did not touch any src/ file -- no bugs found that needed a fix.
+- Pushed to origin/task/03-unit-content-engine. Ready for the Integrator
+  (rebase onto `integration` once it exists and onto whatever vitest.config
+  task 01 lands, per the Decisions note above).
