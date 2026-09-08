@@ -1,7 +1,7 @@
 import type { Project, SiteSpecification } from "@ai-wp/shared";
 import type { EditIntent } from "./editIntent.js";
 import { callTool } from "../tools/dispatcher.js";
-import { createCheckpoint, restoreCheckpoint } from "../tools/checkpoint.js";
+import { createCheckpoint } from "../tools/checkpoint.js";
 import { generateAndActivateChildTheme, regenerateChildThemeStyles } from "../tools/childtheme.js";
 import { resolveThemeName } from "./themes.js";
 import { heuristicDesignSystem } from "./designSystem.js";
@@ -169,7 +169,20 @@ export async function applyEditIntent(project: Project, intent: EditIntent): Pro
     case "undo": {
       const last = [...project.checkpoints].reverse().find((c) => c.kind === "auto");
       if (!last) return { summary: "There's nothing to undo yet.", ok: false };
-      await restoreCheckpoint(project, last.id);
+      // BUG FIX (found in task 06's integration-test pass): this used to call
+      // tools/checkpoint.ts's restoreCheckpoint() directly, bypassing
+      // tools/dispatcher.ts entirely -- the same class of P0 finding task 08
+      // fixed for the *manual* restore route (routes/projects.ts's POST
+      // /:id/checkpoints/:checkpointId/restore), which now goes through
+      // callTool(..., "restore_checkpoint", ...). A chat-typed "undo" runs
+      // the exact same real `wp db import` against the live site, yet had no
+      // permission-tier gate and, more importantly, left zero trace in
+      // project.auditLog -- SEC-05's audit trail is silently blind to every
+      // chat-driven undo. Routing it through the dispatcher like every other
+      // edit-intent branch above closes that gap; `confirm: true` here is the
+      // user's own "undo" message, the equivalent of the manual route's HTTP
+      // request being the explicit confirmation.
+      await callTool(project, "restore_checkpoint", { checkpointId: last.id }, { confirm: true, source: "chat" });
       return { summary: `Restored the state from before "${last.label.replace(/^before: /, "")}".`, ok: true };
     }
   }
